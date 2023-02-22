@@ -1,0 +1,5 @@
+{
+    "auto-reply-param-example": "enable <Your away message goes here (optional)>|disable|status|remove-user UserID",
+    "auto-reply-description": "Auto-reply allows users to automatically send customized messages in response to incoming texts",
+    "auto-reply-room-action-name": "💬 Auto Reply"
+}
