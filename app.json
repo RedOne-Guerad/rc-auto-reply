@@ -1,0 +1,53 @@
+{
+    "id": "821cd5c6-1fb5-4d9e-8e88-e6176463efb6",
+    "version": "2.0.0",
+    "requiredApiVersion": "^1.36.0",
+    "iconFile": "auto-reply.png",
+    "author": {
+        "name": "Redouane GUERAD",
+        "homepage": "https://github.com/RedOne-Guerad/rc-auto-reply",
+        "support": "https://github.com/RedOne-Guerad/rc-auto-reply/issues"
+    },
+    "name": "Auto-Reply",
+    "nameSlug": "auto-reply",
+    "classFile": "AutoReplyApp.ts",
+    "description": "Auto-reply allows users to automatically send customized messages in response to incoming texts.    With this app, users can set up personalized auto-responses to ensure that their contacts receive a prompt reply, even when they are not available to respond immediately.",
+    "implements": [
+        "IPostMessageSent"
+    ],
+    "permissions": [
+        {
+            "name": "ui.registerButtons"
+        },
+        {
+            "name": "slashcommand"
+        },
+        {
+            "name": "message.write"
+        },
+        {
+            "name": "message.read"
+        },
+        {
+            "name": "api"
+        },
+        {
+            "name": "room.read"
+        },
+        {
+            "name": "room.write"
+        },
+        {
+            "name": "user.read"
+        },
+        {
+            "name": "user.write"
+        },
+        {
+            "name": "persistence"
+        },
+        {
+            "name": "scheduler"
+        }
+    ]
+}
