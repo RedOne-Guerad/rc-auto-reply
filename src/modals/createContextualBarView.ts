@@ -99,7 +99,7 @@ export async function createContextualBarView(viewId: any, read: IRead, http: IH
     //     }),
     // });
 
-    // console.log(schedulers);
+
     schedulers?.forEach((scheduler: IScheduler, index: number) => {
         block.addSectionBlock({
             blockId: 'autoReplySettings',
