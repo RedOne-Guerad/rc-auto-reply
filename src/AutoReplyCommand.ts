@@ -44,10 +44,10 @@ export class AutoReplyCommand implements ISlashCommand {
             case 'enable':
                 previousSettings.on = true
                 await persis.updateByAssociation(assoc, previousSettings, true);
-                return await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is enabled, with the follwing message:\n>' + previousSettings.message);
+                return await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is enabled, with the following message:\n>' + previousSettings.message);
             case 'status':
                 if (previousSettings.on) {
-                    return await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is enabled, with the follwing message:\n>' + previousSettings.message);
+                    return await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is enabled, with the following message:\n>' + previousSettings.message);
                 } else {
                     return await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is disabled.');
                 }

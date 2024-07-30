@@ -48,7 +48,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         // If my AutoReply is enabled and I am typing, need to offer an option to disable it
         const me = message.sender;
         const MyAutoReplySettings = await getAutoReplySettings(me.id, read)
-        console.log(MyAutoReplySettings)
+
 
         const otherUserIds = message.room.userIds ?? [];
         if (otherUserIds == undefined) {
@@ -108,7 +108,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
         // check if OtherUser enabled auto-reply
         const OtherAutoReplySettings = await getAutoReplySettings(otherUserId, read)
-        console.log(OtherAutoReplySettings)
+
         if (OtherAutoReplySettings.on) {
             // OtherUser auto-reply not enabled
             if (!OtherAutoReplySettings.on) return
@@ -160,7 +160,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             user,
             room,
         } = context.getInteractionData();
-        console.log(SchedulerType.Daily);
+
         const data = context.getInteractionData()
         if (actionId === 'auto-reply-room-action-id') {
             // get auto-reply settings for this user
@@ -198,7 +198,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
         if(autoReplySchedulerDaily) return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify)
 
-        console.log({'submit': interactionData.view.state })
+
         const action = () => {
             if (autoReplySettings.EnableApp === undefined && autoReplySettings.DisableApp && autoReplySettings.DisableApp === 'Disable') return false
             if (autoReplySettings.DisableApp === undefined && autoReplySettings.EnableApp && autoReplySettings.EnableApp === 'Enable') return true
