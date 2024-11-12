@@ -13,7 +13,6 @@ function registerJob(scheduler: ISchedulerExtend, userId: string) {
     },
     processor: async (jobContext, read, modify) => {
       // your job logic here
-      console.log(`Running job for user ${jobData.userId}`);
     },
   }]);
 }
