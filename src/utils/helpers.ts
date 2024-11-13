@@ -6,7 +6,7 @@ import { IUser } from '@rocket.chat/apps-engine/definition/users';
 
 import { AutoReplyApp } from '../../AutoReplyApp';
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
-import { IAutoReplySettings } from './IAutoReplySettings';
+import { IAutoReplySettings, IReplyFrequency } from './IAutoReplySettings';
 
 
 
@@ -19,6 +19,8 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
         message: autoReplySettings?.message || 'Hey, I received your message and will get back to you as soon as possible.',
         users: autoReplySettings?.users ?? [],
         schedulers: autoReplySettings?.schedulers ?? [],
+        usersLastReply: autoReplySettings?.usersLastReply ?? [],
+        replyFrequency: autoReplySettings?.replyFrequency ?? String(IReplyFrequency.OnEveryMessage),
     };
 }
 

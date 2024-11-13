@@ -34,7 +34,9 @@ export class AutoReplyCommand implements ISlashCommand {
                     on: false,
                     message: previousSettings.message,
                     users: previousSettings.users,
-                    schedulers: previousSettings.schedulers
+                    schedulers: previousSettings.schedulers,
+                    usersLastReply: previousSettings.usersLastReply,
+                    replyFrequency: previousSettings.replyFrequency,
                 }
                 await persis.updateByAssociation(assoc, autoReplySettings, true);
                 // TODO: Maybe say something different
@@ -82,7 +84,9 @@ export class AutoReplyCommand implements ISlashCommand {
                 on: true,
                 message: previousSettings.message,
                 users: previousSettings.users,
-                schedulers: previousSettings.schedulers
+                schedulers: previousSettings.schedulers,
+                usersLastReply: previousSettings.usersLastReply,
+                replyFrequency: previousSettings.replyFrequency,
             };
             await persis.updateByAssociation(assoc, autoReplySettings, true);
 
@@ -99,7 +103,9 @@ export class AutoReplyCommand implements ISlashCommand {
             on: true,
             message: args.join(' '),
             users: previousSettings.users,
-            schedulers: previousSettings.schedulers
+            schedulers: previousSettings.schedulers,
+            usersLastReply: previousSettings.usersLastReply,
+            replyFrequency: previousSettings.replyFrequency,
         };
 
         await persis.updateByAssociation(assoc, autoReplySettings, true);

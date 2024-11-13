@@ -56,6 +56,12 @@ export async function createContextualBarView(viewId: any, read: IRead, http: IH
                 style: ButtonStyle.DANGER,
                 actionId: 'DisableApp',
             }),
+            block.newButtonElement({
+                text: block.newPlainTextObject('Show Preferences'),
+                value: 'OpenReplyPreferences',
+                style: ButtonStyle.DANGER,
+                actionId: 'OpenReplyPreferences',
+            }),
         ]
     });
 
@@ -69,6 +75,35 @@ export async function createContextualBarView(viewId: any, read: IRead, http: IH
         }),
         label: block.newPlainTextObject('📝 Auto-reply Message:'),
     })
+
+    if (users && users?.length > 0) {
+        block.addSectionBlock({
+            blockId: 'autoReplySettings',
+            text: block.newMarkdownTextObject('*Excluded Users*\n>Auto-Reply is disabled for those users:'),
+        })
+        block.addActionsBlock({
+            blockId: 'autoReplySettings',
+            elements: [
+                block.newMultiStaticElement({
+                    placeholder: block.newPlainTextObject('username'),
+                    actionId: 'ExcludeUsers',
+                    options: users.map((user: IUser) => ({
+                        text: block.newPlainTextObject(user.name),
+                        value: user.id,
+                    })),
+                    initialValue: users.map((user: IUser) => user.id)
+                }),
+            ],
+        });
+    }
+
+
+    if (autoReplySettings.replyFrequency){
+        block.addSectionBlock({
+            blockId: 'autoReplySettings',
+            text: block.newMarkdownTextObject(`>Reply Frequency: *${autoReplySettings.replyFrequency}*`)
+        })
+    }
 
     // Scheduler
     // ToDo
@@ -104,9 +139,9 @@ export async function createContextualBarView(viewId: any, read: IRead, http: IH
         block.addSectionBlock({
             blockId: 'autoReplySettings',
             text: block.newMarkdownTextObject(`>*${index + 1}-* ${scheduler.type} Scheduler, Enable Everyday at *${scheduler.settings.enableTime}* and disable at *${scheduler.settings.disableTime}*`),
-            accessory: 
+            accessory:
                 block.newOverflowMenuElement({
-                    options:[
+                    options: [
                         {
                             text: block.newPlainTextObject('📝 Edit scheduler'),
                             value: String(index)
@@ -116,31 +151,11 @@ export async function createContextualBarView(viewId: any, read: IRead, http: IH
                             value: String(index)
                         },
                     ],
-                actionId: 'EditScheduler',
-            }),
+                    actionId: 'EditScheduler',
+                }),
         });
     })
 
-    if (users && users?.length > 0) {
-        block.addSectionBlock({
-            blockId: 'autoReplySettings',
-            text: block.newMarkdownTextObject('*Excluded Users*\n>Auto-Reply is disabled for those users:'),
-        })
-        block.addActionsBlock({
-            blockId: 'autoReplySettings',
-            elements: [
-                block.newMultiStaticElement({
-                    placeholder: block.newPlainTextObject('username'),
-                    actionId: 'ExcludeUsers',
-                    options: users.map((user: IUser) => ({
-                        text: block.newPlainTextObject(user.name),
-                        value: user.id,
-                    })),
-                    initialValue: users.map((user: IUser) => user.id)
-                }),
-            ],
-        });
-    }
 
     return {
         id: viewId ?? uuid(),

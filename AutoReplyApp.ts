@@ -12,13 +12,14 @@ import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket
 import { RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
 
-import { IAutoReplySettings, SchedulerType } from './src/utils/IAutoReplySettings';
+import { IAutoReplySettings, IReplyFrequency, SchedulerType } from './src/utils/IAutoReplySettings';
 import { AutoReplyCommand } from './src/AutoReplyCommand';
 import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/definition/ui';
 import { IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
 import { getAutoReplySettings, sendMessage, sendNotifyMessage, uuid } from './src/utils/helpers';
 import { createContextualBarView } from './src/modals/createContextualBarView';
 import { createSchedulerModal } from './src/modals/createSchedulerModal';
+import { createReplyPreferencesModal } from './src/modals/createReplyPreferencesModal';
 
 export class AutoReplyApp extends App implements IPostMessageSent {
 
@@ -110,17 +111,69 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         const OtherAutoReplySettings = await getAutoReplySettings(otherUserId, read)
 
         if (OtherAutoReplySettings.on) {
-            // OtherUser auto-reply not enabled
-            if (!OtherAutoReplySettings.on) return
             // OtherUser excluded me?
             // dont send me auto-reply message
             if (OtherAutoReplySettings.users?.findIndex(user => user.id === me.id) !== -1) return
+            // OtherUser replyFrequency
+            const OtherreplyFrequency = OtherAutoReplySettings.replyFrequency
+            if (OtherreplyFrequency != String(IReplyFrequency.OnEveryMessage) && OtherAutoReplySettings.usersLastReply) {
+                // Last Time OtherUser Send me a reply
+                let OtherLastReply: Date | null = null;
+                for (const userLastReply of OtherAutoReplySettings.usersLastReply) {
+                    if (userLastReply.user.id === me.id) {
+                        OtherLastReply = userLastReply.lastMessage;
+                        break;
+                    }
+                }
+                // OtherUser reply once and he already replied
+                if (OtherreplyFrequency == String(IReplyFrequency.Once) && OtherLastReply != null) return
+                // Custom reply interval check
+                if (OtherLastReply != null) {
+                    const currentTime = new Date();
+                    const lastReplyTime = new Date(OtherLastReply);
+                    const timeDifference = currentTime.getTime() - lastReplyTime.getTime();
+                    // OtherUser reply once per hour and 1 hour not yet passed
+                    if (OtherreplyFrequency == String(IReplyFrequency.OncePerHour) && OtherLastReply != null) {
+                        const hoursDifference = timeDifference / (1000 * 60 * 60); // Convert milliseconds to hours
+                        if (hoursDifference < 1) return;
+                    }
+                    // OtherUser reply once per day and 1 day not yet passed
+                    if (OtherreplyFrequency == String(IReplyFrequency.OncePerDay) && OtherLastReply != null) {
+                        const daysDifference = timeDifference / (1000 * 60 * 60 * 24); // Convert milliseconds to days
+                        if (daysDifference < 1) return;
+                    }
+                    // OtherUser reply once per week and 1 week not yet passed
+                    if (OtherreplyFrequency == String(IReplyFrequency.OncePerWeek) && OtherLastReply != null) {
+                        const daysDifference = timeDifference / (1000 * 60 * 60 * 24 * 7); // Convert milliseconds to days
+                        if (daysDifference < 1) return;
+                    }
+                    // OtherUser reply once per month and 1 month not yet passed
+                    if (OtherreplyFrequency == String(IReplyFrequency.OncePerMonth) && OtherLastReply != null) {
+                        const daysDifference = timeDifference / (1000 * 60 * 60 * 24 * 7 * 30); // Convert milliseconds to days
+                        if (daysDifference < 1) return;
+                    }
+                }
+            }
             // auto-reply enabled, send auto-reply message
             await sendMessage(this, modify, message.room, otherUser, OtherAutoReplySettings.message);
+            // Update OtherUser lastReply to me time
+            const previousSettings = await getAutoReplySettings(otherUser.id, read);
+            const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, otherUser.id);
+            const usersLastReply = previousSettings?.usersLastReply || [];
+            const userLastReplyIndex = usersLastReply.findIndex(reply => reply.user.id === me.id);
+            if (userLastReplyIndex !== -1) {
+                usersLastReply[userLastReplyIndex].lastMessage = new Date();
+            } else {
+                usersLastReply.push({ user: me, lastMessage: new Date() });
+            }
+            const state: IAutoReplySettings = {
+                ...previousSettings,
+                usersLastReply,
+            };
+            await persistence.updateByAssociation(assocMe, state, true);
         }
         // The user is not marked as away
         return;
-
     }
     /**
     * Extends the Rocket.Chat configuration with a new button in the UI and a new slash command
@@ -183,12 +236,15 @@ export class AutoReplyApp extends App implements IPostMessageSent {
     public async executeViewSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
         const interactionData = context.getInteractionData()
         const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
-        const { autoReplySettings, autoReplySchedulerDaily }: {
+        const { autoReplySettings, autoReplyPreferences, autoReplySchedulerDaily }: {
             autoReplySettings: {
                 EnableApp?: string,
                 DisableApp?: string,
                 ExcludeUsers?: Array<string>,
                 AutoReplyMessage?: string,
+            },
+            autoReplyPreferences: {
+                replyPreferencesFrequency: string
             },
             autoReplySchedulerDaily: {
                 EnableTime?: string,
@@ -196,6 +252,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             }
         } = interactionData.view.state as any;
 
+        if(autoReplyPreferences) return await this.executeReplyPreferencesFrequencySubmitHandler(context, read, http, persistence, modify)
         if(autoReplySchedulerDaily) return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify)
 
 
@@ -209,7 +266,6 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (noChanges) {
             return { success: false };
         }
-
         // Get the previous auto-reply settings if they exist. 
         const previousSettings = await getAutoReplySettings(interactionData.user.id, read);
 
@@ -224,7 +280,9 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             on: action() ?? previousSettings?.on ?? false,
             message: autoReplySettings.AutoReplyMessage || previousSettings?.message,
             users: await excludeUsers() ?? [],
-            schedulers: previousSettings?.schedulers
+            schedulers: previousSettings?.schedulers,
+            usersLastReply: previousSettings?.usersLastReply,
+            replyFrequency: previousSettings.replyFrequency || String(IReplyFrequency.OnEveryMessage),
         }
 
         await persistence.updateByAssociation(assocMe, state, true);
@@ -270,6 +328,27 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             success: true,
         };
     }
+    public async executeReplyPreferencesFrequencySubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
+        const interactionData = context.getInteractionData()
+        const { autoReplyPreferences }: {
+            autoReplyPreferences: {
+                replyPreferencesFrequency: string
+            },
+        } = interactionData.view.state as any;
+        // Get the previous auto-reply settings if they exist. 
+        const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
+        const previousSettings = await getAutoReplySettings(interactionData.user.id, read);
+
+        if(autoReplyPreferences && autoReplyPreferences.replyPreferencesFrequency){
+            previousSettings.replyFrequency = autoReplyPreferences.replyPreferencesFrequency
+            const modal = await createContextualBarView(interactionData.view.submit?.value, read, http, persistence, modify, previousSettings)
+            if(context.getInteractionResponder().updateContextualBarViewResponse(modal).success)
+                await persistence.updateByAssociation(assocMe, previousSettings, true);
+        }
+        return {
+            success: true,
+        };
+    }
 
     /**
     * Handles the execution of a block action, such as clicking a button.
@@ -296,6 +375,10 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
         if (data.actionId === 'AddScheduler') {
             const modal = await createSchedulerModal(data.container.id, modify, SchedulerType[data.value || 'Daily'], autoReplySettings)
+            return  context.getInteractionResponder().openModalViewResponse(modal);
+        }
+        if (data.actionId === 'OpenReplyPreferences') {
+            const modal = await createReplyPreferencesModal(data.container.id, modify, autoReplySettings)
             return  context.getInteractionResponder().openModalViewResponse(modal);
         }
         return {
