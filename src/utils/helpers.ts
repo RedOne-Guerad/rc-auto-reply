@@ -18,7 +18,7 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
         on: autoReplySettings?.on ?? false,
         message: autoReplySettings?.message || 'Hey, I received your message and will get back to you as soon as possible.',
         users: autoReplySettings?.users ?? [],
-        schedulers: autoReplySettings?.schedulers ?? [],
+        schedulers: autoReplySettings?.schedulers,
         usersLastReply: autoReplySettings?.usersLastReply ?? [],
         replyFrequency: autoReplySettings?.replyFrequency ?? String(IReplyFrequency.OnEveryMessage),
     };
@@ -28,11 +28,7 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
  * Copied from https://github.com/sampaiodiego/rocket.chat.app-poll/blob/4188fb6ba2b68b03d1b992735c46ee5f04fc18c8/src/lib/uuid.ts 
  */
 export function uuid(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+    return "821cd5c6-1fb5-4d9e-8e88-e6176463efb6"
 }
 /**
  * Sends a message using bot
@@ -125,28 +121,72 @@ export const daysOfWeek = [
 ];
 
 export const hoursOfDay = [
-    { text: '12:00am', value: '00:00' },
-    { text: '1:00am', value: '01:00' },
-    { text: '2:00am', value: '02:00' },
-    { text: '3:00am', value: '03:00' },
-    { text: '4:00am', value: '04:00' },
-    { text: '5:00am', value: '05:00' },
-    { text: '6:00am', value: '06:00' },
-    { text: '7:00am', value: '07:00' },
-    { text: '8:00am', value: '08:00' },
-    { text: '9:00am', value: '09:00' },
-    { text: '10:00am', value: '10:00' },
-    { text: '11:00am', value: '11:00' },
-    { text: '12:00pm', value: '12:00' },
-    { text: '1:00pm', value: '13:00' },
-    { text: '2:00pm', value: '14:00' },
-    { text: '3:00pm', value: '15:00' },
-    { text: '4:00pm', value: '16:00' },
-    { text: '5:00pm', value: '17:00' },
-    { text: '6:00pm', value: '18:00' },
-    { text: '7:00pm', value: '19:00' },
-    { text: '8:00pm', value: '20:00' },
-    { text: '9:00pm', value: '21:00' },
-    { text: '10:00pm', value: '22:00' },
-    { text: '11:00pm', value: '23:00' },
+    { text: '12am', value: '00' },
+    { text: '1am', value: '01' },
+    { text: '2am', value: '02' },
+    { text: '3am', value: '03' },
+    { text: '4am', value: '04' },
+    { text: '5am', value: '05' },
+    { text: '6am', value: '06' },
+    { text: '7am', value: '07' },
+    { text: '8am', value: '08' },
+    { text: '9am', value: '09' },
+    { text: '10am', value: '10' },
+    { text: '11am', value: '11' },
+    { text: '12pm', value: '12' },
+    { text: '1pm', value: '13' },
+    { text: '2pm', value: '14' },
+    { text: '3pm', value: '15' },
+    { text: '4pm', value: '16' },
+    { text: '5pm', value: '17' },
+    { text: '6pm', value: '18' },
+    { text: '7pm', value: '19' },
+    { text: '8pm', value: '20' },
+    { text: '9pm', value: '21' },
+    { text: '10pm', value: '22' },
+    { text: '11pm', value: '23' },
 ];
+export const minutesOfHour = Array.from({ length: 60 }, (_, i) => {
+    const minute = i.toString().padStart(2, '0');
+    return { text: minute, value: minute };
+});
+export function extractDate(date: Date | undefined): string | undefined {
+    if (date instanceof Date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return undefined;
+  }
+  
+  
+  export function extractHours(date: Date | undefined): string | undefined {
+    if (date instanceof Date) {
+      return String(date.getHours())
+    }
+    return undefined;
+  }
+  
+  export function extractMinutes(date: Date | undefined): string | undefined {
+    if (date instanceof Date) {
+      return String(date.getMinutes())
+    }
+    return undefined;
+  }
+  
+  export function stringDateTime(date?: Date): string | undefined {
+    if (date instanceof Date) {
+      const options: Intl.DateTimeFormatOptions = {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true,
+      };
+      return date.toLocaleString('en-US', options);
+    }
+    return undefined;
+  }
+  
