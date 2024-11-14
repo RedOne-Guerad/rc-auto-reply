@@ -1,5 +1,5 @@
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
-import { ActionsBlock, ButtonElement, ContextBlock, DividerBlock, InputBlock, Option, SectionBlock, StaticSelectElement } from "@rocket.chat/ui-kit";
+import { ActionsBlock, ButtonElement, ContextBlock, DividerBlock, InputBlock, Option, PlainText, SectionBlock, StaticSelectElement } from "@rocket.chat/ui-kit";
 import { uuid } from "./helpers";
 
 export function InputBlock(labelText: string, placeholderText: string, blockId: string, actionId: string, initialValue?: string, multiline?: boolean): InputBlock {
@@ -118,4 +118,12 @@ export function ActionsBlock(blockId: string, elements: Array<ButtonElement | St
     blockId: blockId,
     elements: elements,
   };
+}
+
+export function PlainText(text: string, emoji?: boolean): PlainText {
+    return {
+        type: "plain_text",
+        text: text,
+        emoji: emoji
+    };
 }
