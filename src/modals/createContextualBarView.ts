@@ -1,173 +1,92 @@
 import { IHttp, IModify, IPersistence, IRead } from "@rocket.chat/apps-engine/definition/accessors";
-import { IAutoReplySettings, IScheduler, SchedulerType } from "../utils/IAutoReplySettings";
+import { IAutoReplySettings, IScheduler } from "../utils/IAutoReplySettings";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
-import { uuid } from "../utils/helpers";
-import { ButtonStyle, IBlock } from "@rocket.chat/apps-engine/definition/uikit";
+import { stringDateTime, uuid } from "../utils/helpers";
+import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
+import { ActionsBlock, Button, DividerBlock, InputBlock, MultiStaticSelectElement, InputOption, PlainText, SectionBlock,  TextInput, UsersSelectInput } from "../utils/blockBuilder";
 
-export async function createContextualBarView(viewId: any, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify, autoReplySettings: IAutoReplySettings): Promise<IUIKitModalViewParam> {
-    const {
-        on,
-        message,
-        users,
-        schedulers
-    } = autoReplySettings;
-    // get auto-reply data for this user
-    // const viewId = data.container?.id || uuid();
-    const block = modify.getCreator().getBlockBuilder();
+export async function createContextualBarView(
+    viewId: any,
+    read: IRead,
+    http: IHttp,
+    persistence: IPersistence,
+    modify: IModify,
+    autoReplySettings: IAutoReplySettings
+): Promise<IUIKitModalViewParam> {
+    const { on, message, users, schedulers } = autoReplySettings;
+    const blocks: any[] = [];
+    const blockID = "autoReplySettings"
 
-    block.addSectionBlock({
-        text: block.newMarkdownTextObject("*Auto-reply* allows you to automatically send customized messages in response to incoming texts.\nyou can set up personalized auto-responses to ensure that your contacts receive a prompt reply, even when you are not available to respond immediately."),
-    });
-    block.addDividerBlock()
+    blocks.push(SectionBlock(
+        "*Auto-reply* allows you to automatically send customized messages in response to incoming texts.\nyou can set up personalized auto-responses to ensure that your contacts receive a prompt reply, even when you are not available to respond immediately.", "mrkdwn")
+    );
+    blocks.push(DividerBlock());
 
-    if (!on) {
-        block.addActionsBlock({
-            blockId: 'autoReplySettings',
-            elements: [
-                block.newButtonElement({
-                    text: block.newPlainTextObject('Enable Auto-reply'),
-                    value: 'Enable',
-                    style: ButtonStyle.PRIMARY,
-                    actionId: 'EnableApp',
-                }),
+    blocks.push(ActionsBlock(blockID, [
+        Button(
+            on ? "Disable Auto-reply" : "Enable Auto-reply",
+            blockID,
+            on ? "DisableApp" : "EnableApp",
+            on ? "Disable" : "Enable",
+            on ? ButtonStyle.DANGER : ButtonStyle.PRIMARY,
+        ),
+        ...(on
+            ? [
+                Button(
+                    "Show Preferences",
+                    blockID,
+                    "OpenReplyPreferences",
+                    "OpenReplyPreferences",
+                    ButtonStyle.PRIMARY,
+                ),
             ]
-        });
+            : []),
+    ]));
 
-        return {
-            id: viewId ?? uuid(),
-            title: block.newPlainTextObject('Auto Reply', true),
-            submit: block.newButtonElement({
-                text: block.newPlainTextObject('Submit'),
-                style: ButtonStyle.PRIMARY,
-            }),
-            close: block.newButtonElement({
-                text: block.newPlainTextObject('Cancel'),
-            }),
-            blocks: block.getBlocks(),
+    if (on) {
+        blocks.push(InputBlock(
+            "📝 Auto-reply Message:",
+            TextInput(
+                "",
+                blockID,
+                "AutoReplyMessage",
+                message || "Hey, I received your message and will get back to you as soon as possible.", true
+            )
+        ));
+
+        if (users && users.length > 0) {
+            blocks.push(SectionBlock("*Excluded Users*\n>Auto-Reply is disabled for those users:", "mrkdwn",
+                MultiStaticSelectElement(
+                    "username",
+                    users.map((user: IUser) => InputOption(user.name, user.id)),
+                    blockID,
+                    "ExcludeUsers",
+                    users.map((user: IUser) => user.id)
+                )
+            ));
+        }
+
+        if (autoReplySettings.replyFrequency) {
+            blocks.push(SectionBlock(`>Reply Frequency: *${autoReplySettings.replyFrequency}*`, "mrkdwn"));
         }
     }
-    block.addActionsBlock({
-        blockId: 'autoReplySettings',
-        elements: [
-            block.newButtonElement({
-                text: block.newPlainTextObject('Disable Auto-reply'),
-                value: 'Disable',
-                style: ButtonStyle.DANGER,
-                actionId: 'DisableApp',
-            }),
-            block.newButtonElement({
-                text: block.newPlainTextObject('Show Preferences'),
-                value: 'OpenReplyPreferences',
-                style: ButtonStyle.DANGER,
-                actionId: 'OpenReplyPreferences',
-            }),
-        ]
-    });
-
-    block.addInputBlock({
-        blockId: 'autoReplySettings',
-        optional: false,
-        element: block.newPlainTextInputElement({
-            actionId: 'AutoReplyMessage',
-            initialValue: message || 'Hey, I received your message and will get back to you as soon as possible.',
-            multiline: true,
-        }),
-        label: block.newPlainTextObject('📝 Auto-reply Message:'),
-    })
-
-    if (users && users?.length > 0) {
-        block.addSectionBlock({
-            blockId: 'autoReplySettings',
-            text: block.newMarkdownTextObject('*Excluded Users*\n>Auto-Reply is disabled for those users:'),
-        })
-        block.addActionsBlock({
-            blockId: 'autoReplySettings',
-            elements: [
-                block.newMultiStaticElement({
-                    placeholder: block.newPlainTextObject('username'),
-                    actionId: 'ExcludeUsers',
-                    options: users.map((user: IUser) => ({
-                        text: block.newPlainTextObject(user.name),
-                        value: user.id,
-                    })),
-                    initialValue: users.map((user: IUser) => user.id)
-                }),
-            ],
-        });
+    if (schedulers){
+        blocks.push(SectionBlock(
+            `>Scheduler, Enable On *${stringDateTime(schedulers?.enable?.time)}*`,
+            "mrkdwn"
+        ));
+        blocks.push(SectionBlock(
+            `>Scheduler, Disable On *${stringDateTime(schedulers?.disable?.time)}*`,
+            "mrkdwn"
+        ));
     }
-
-
-    if (autoReplySettings.replyFrequency){
-        block.addSectionBlock({
-            blockId: 'autoReplySettings',
-            text: block.newMarkdownTextObject(`>Reply Frequency: *${autoReplySettings.replyFrequency}*`)
-        })
-    }
-
-    // Scheduler
-    // ToDo
-    // block.addSectionBlock({
-    //     blockId: 'autoReplySettings',
-    //     text: block.newMarkdownTextObject('⏰ *Add a scheduler to enable and disable auto-reply* '),
-    //     accessory: 
-    //         block.newOverflowMenuElement({
-    //             options:[
-    //                 {
-    //                     text: block.newPlainTextObject('⏰ Daily scheduler'),
-    //                     value: String(SchedulerType.Daily)
-    //                 },
-    //                 {
-    //                     text: block.newPlainTextObject('📆 Weekly scheduler'),
-    //                     value: String(SchedulerType.Weekly)
-    //                 },
-    //                 {
-    //                     text: block.newPlainTextObject('🗓️ Monthly scheduler'),
-    //                     value: String(SchedulerType.Monthly)
-    //                 },
-    //                 {
-    //                     text: block.newPlainTextObject('📅 Yearly scheduler'),
-    //                     value: String(SchedulerType.Yearly)
-    //                 },
-    //             ],
-    //         actionId: 'AddScheduler',
-    //     }),
-    // });
-
-
-    schedulers?.forEach((scheduler: IScheduler, index: number) => {
-        block.addSectionBlock({
-            blockId: 'autoReplySettings',
-            text: block.newMarkdownTextObject(`>*${index + 1}-* ${scheduler.type} Scheduler, Enable Everyday at *${scheduler.settings.enableTime}* and disable at *${scheduler.settings.disableTime}*`),
-            accessory:
-                block.newOverflowMenuElement({
-                    options: [
-                        {
-                            text: block.newPlainTextObject('📝 Edit scheduler'),
-                            value: String(index)
-                        },
-                        {
-                            text: block.newPlainTextObject('❌ Remove scheduler'),
-                            value: String(index)
-                        },
-                    ],
-                    actionId: 'EditScheduler',
-                }),
-        });
-    })
-
 
     return {
         id: viewId ?? uuid(),
-        title: block.newPlainTextObject('Auto Reply', true),
-        submit: block.newButtonElement({
-            text: block.newPlainTextObject('Submit'),
-            style: ButtonStyle.PRIMARY,
-        }),
-        close: block.newButtonElement({
-            text: block.newPlainTextObject('Cancel'),
-        }),
-
-        blocks: block.getBlocks(),
-    }
+        title: PlainText("Auto Reply", true),
+        submit: Button("Submit", blockID, "submitSettings", "submit", ButtonStyle.PRIMARY),
+        close: Button("Cancel", blockID, "cancelSettings"),
+        blocks: blocks,
+    };
 }
