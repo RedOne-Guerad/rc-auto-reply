@@ -105,6 +105,21 @@ export function StaticSelectElement(placeholderText: string, options: Array<Opti
   };
 }
 
+export function MultiStaticSelectElement(placeholderText: string, options: Array<Option>, blockId: string, actionId: string, initialValue?: Option["value"][]): MultiStaticSelectElement {
+    return {
+        type: "multi_static_select",
+        placeholder: {
+            type: "plain_text",
+            text: placeholderText,
+        },
+        options: options,
+        appId: uuid(),
+        blockId: blockId,
+        actionId: actionId,
+        initialValue: initialValue,
+    };
+}
+
 export function Option(text: string, value: string): Option {
   return {
     text: { type: "plain_text", text: text },
