@@ -1,10 +1,4 @@
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
-export enum SchedulerType {
-    Yearly = 'Yearly',
-    Monthly = 'Monthly',
-    Weekly = 'Weekly',
-    Daily = 'Daily',
-}
 export enum IReplyFrequency {
     OnEveryMessage = 'On Every Message',
     Once = 'Once',
@@ -13,18 +7,13 @@ export enum IReplyFrequency {
     OncePerWeek = 'Once Per Week',
     OncePerMonth = 'Once Per Month',
 }
-export interface ISchedulerSettings {
-    enableTime?: string,
-    disableTime?: string,
-    weekdays?: string,
-    monthdays?: string,
-    yearmonths?: string,
-    message?: string
-}
 export interface IScheduler {
-    id: string,
-    settings: ISchedulerSettings,
-    type: SchedulerType
+    enable?: {
+        time: Date
+    }
+    disable?: {
+        time: Date
+    }
 }
 export interface IUsersLastReply {
     user: IUser,
@@ -34,7 +23,7 @@ export interface IAutoReplySettings {
     on: boolean;
     message: string;
     users?: IUser[],
-    schedulers?: IScheduler[],
+    schedulers?: IScheduler,
     usersLastReply?: IUsersLastReply[],
     replyFrequency: string,
   };
