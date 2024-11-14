@@ -1,7 +1,7 @@
 import { IHttp, IModify, IPersistence, IRead } from "@rocket.chat/apps-engine/definition/accessors";
 import { IUIKitResponse, UIKitViewSubmitInteractionContext } from "@rocket.chat/apps-engine/definition/uikit";
 import { getAutoReplySettings, sendNotifyMessage, uuid } from "../utils/helpers";
-import { IAutoReplySettings, IReplyFrequency, SchedulerType } from "../utils/IAutoReplySettings";
+import { IAutoReplySettings, IReplyFrequency } from "../utils/IAutoReplySettings";
 import { createContextualBarView } from "../modals/createContextualBarView";
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from "@rocket.chat/apps-engine/definition/metadata";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
@@ -20,13 +20,10 @@ export class ViewSubmitHandler {
     public async execute(): Promise<IUIKitResponse> {
         const interactionData = this.context.getInteractionData();
         const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
-        const { autoReplySettings, autoReplyPreferences, autoReplySchedulerDaily } = interactionData.view.state as any;
+        const { autoReplySettings, autoReplyPreferences } = interactionData.view.state as any;
 
         if (autoReplyPreferences) {
-            return await this.executeReplyPreferencesFrequencySubmitHandler();
-        }
-        if (autoReplySchedulerDaily) {
-            return await this.executeAddSchedulerSubmitHandler();
+            return await this.executeAutoReplyPreferencesSubmitHandler();
         }
 
         const action = this.getAction(autoReplySettings);
@@ -78,43 +75,58 @@ export class ViewSubmitHandler {
         return users.filter((user: IUser): user is IUser => user !== undefined);
     }
 
-    private async executeAddSchedulerSubmitHandler(): Promise<IUIKitResponse> {
-        const interactionData = this.context.getInteractionData();
-        const { autoReplySchedulerDaily } = interactionData.view.state as any;
-        const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
-        const previousSettings = await getAutoReplySettings(interactionData.user.id, this.read);
-
-        if (autoReplySchedulerDaily && autoReplySchedulerDaily.EnableTime && autoReplySchedulerDaily.DisableTime) {
-            previousSettings.schedulers?.push({
-                id: uuid(),
-                settings: {
-                    enableTime: autoReplySchedulerDaily.EnableTime,
-                    disableTime: autoReplySchedulerDaily.DisableTime,
-                    message: autoReplySchedulerDaily.Message || previousSettings.message
-                },
-                type: SchedulerType.Daily
-            });
-            const modal = await createContextualBarView(interactionData.view.submit?.value, this.read, this.http, this.persistence, this.modify, previousSettings);
-            if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
-                await this.persistence.updateByAssociation(assocMe, previousSettings, true);
-            }
-        }
-        return { success: true };
-    }
-
-    private async executeReplyPreferencesFrequencySubmitHandler(): Promise<IUIKitResponse> {
+    private async executeAutoReplyPreferencesSubmitHandler(): Promise<IUIKitResponse> {
         const interactionData = this.context.getInteractionData();
         const { autoReplyPreferences } = interactionData.view.state as any;
         const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
         const previousSettings = await getAutoReplySettings(interactionData.user.id, this.read);
 
-        if (autoReplyPreferences && autoReplyPreferences.replyPreferencesFrequency) {
-            previousSettings.replyFrequency = autoReplyPreferences.replyPreferencesFrequency;
-            const modal = await createContextualBarView(interactionData.view.submit?.value, this.read, this.http, this.persistence, this.modify, previousSettings);
-            if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
-                await this.persistence.updateByAssociation(assocMe, previousSettings, true);
-            }
+        if (autoReplyPreferences && autoReplyPreferences?.replyPreferencesFrequency) {
+            previousSettings.replyFrequency = autoReplyPreferences?.replyPreferencesFrequency;
+            // const modal = await createContextualBarView(interactionData.view.submit?.value, this.read, this.http, this.persistence, this.modify, previousSettings);
+            // if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
+            //     await this.persistence.updateByAssociation(assocMe, previousSettings, true);
+            // }
         }
+
+        if (autoReplyPreferences && autoReplyPreferences?.schedulerEnableDate && autoReplyPreferences?.schedulerEnableTimeHour && autoReplyPreferences?.schedulerEnableTimeMinute) {
+            const [year, month, day] = autoReplyPreferences.schedulerEnableDate.split('-');
+            const enableDateTime = new Date(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                autoReplyPreferences.schedulerEnableTimeHour,
+                autoReplyPreferences.schedulerEnableTimeMinute
+            );
+            previousSettings.schedulers = {
+                ...previousSettings.schedulers,
+                enable: {
+                    time: enableDateTime
+                }
+            };
+        }
+        if (autoReplyPreferences && autoReplyPreferences?.schedulerDisableDate && autoReplyPreferences?.schedulerDisableTimeHour && autoReplyPreferences?.schedulerDisableTimeMinute) {
+            const [year, month, day] = autoReplyPreferences.schedulerDisableDate.split('-');
+            const disableDateTime = new Date(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                autoReplyPreferences.schedulerDisableTimeHour,
+                autoReplyPreferences.schedulerDisableTimeMinute
+            );
+            previousSettings.schedulers = {
+                ...previousSettings.schedulers,
+                disable: {
+                    time: disableDateTime
+                }
+            };
+        }
+        const modal = await createContextualBarView(interactionData.view.submit?.value, this.read, this.http, this.persistence, this.modify, previousSettings);
+        if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
+            await this.persistence.updateByAssociation(assocMe, previousSettings, true);
+        }
+        console.log(previousSettings);
+
         return { success: true };
     }
 }
