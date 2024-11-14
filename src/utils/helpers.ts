@@ -44,7 +44,7 @@ export function uuid(): string {
  * @param message What to send
  * @param attachments (optional) Message attachments (such as action buttons)
  */
-export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
+export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message: string, threadId?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
     const botUser = (await app.getAccessors()
         .reader.getUserReader()
         .getAppUser(app.getID())) as IUser;
@@ -63,6 +63,9 @@ export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoo
     }
     if (blocks !== undefined) {
         messageStructure.setBlocks(blocks);
+    }
+    if (threadId) {
+        messageStructure.setThreadId(threadId)
     }
     try {
         await modify.getCreator().finish(messageStructure);

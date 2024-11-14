@@ -109,7 +109,8 @@ export class PostMessageSentHandler{
             if (this.shouldSkipAutoReply(OtherreplyFrequency, OtherLastReply)) return;
         }
     
-        await sendMessage(this.app, this.modify, this.message.room, otherUser, OtherAutoReplySettings.message);
+        const threadId = this.message.threadId
+        await sendMessage(this.app, this.modify, this.message.room, otherUser, OtherAutoReplySettings.message, threadId);
         await this.updateOtherUserLastReply(otherUser.id, me);
     }
     
