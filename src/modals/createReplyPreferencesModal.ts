@@ -10,10 +10,9 @@ export async function createReplyPreferencesModal(cxtViewID: string, modify: IMo
 
     const blocks: any[] = []
     const blockID = 'autoReplyPreferences'
-    blocks.push(ContextBlock('Here you can set Auto-reply settings on how you want to reply when someone texts you'))
-    blocks.push(DividerBlock())
-    blocks.push(SectionBlock('Select Reply Frequency:'))
-
+    blocks.push(ContextBlock('Customize your auto-reply settings to control how and when you want to respond to incoming messages.'));
+    blocks.push(DividerBlock());
+    blocks.push(SectionBlock('Choose how often you want to send auto-replies:'));
     const replyFrequencySelectEle = StaticSelectElement(
         'Reply Frequency',
         [
@@ -36,8 +35,8 @@ export async function createReplyPreferencesModal(cxtViewID: string, modify: IMo
 
     // scheduler
     blocks.push(DividerBlock())
-    blocks.push(ContextBlock('Enable and disable auto-reply automatically using scheduler'))
-    blocks.push(SectionBlock('Enable At: Choose date and time'))
+    blocks.push(ContextBlock('Set up a scheduler to automatically enable and disable auto-reply based on your preferred time and dates.'));
+    blocks.push(SectionBlock('Select the date and time when you want the auto-reply feature to be enabled:'));
     const housInpute: Option[] = []
     hoursOfDay.forEach(hour => housInpute.push(InputOption(hour.text, hour.value)));
     const minutesInpute: Option[] = []
@@ -72,7 +71,7 @@ export async function createReplyPreferencesModal(cxtViewID: string, modify: IMo
             ),
         ])
     )
-    blocks.push(SectionBlock('Disable At: Choose date and time'))
+    blocks.push(SectionBlock('Select the date and time when you want the auto-reply feature to be disabled:'));
     blocks.push(ActionsBlock(
         blockID,
         [

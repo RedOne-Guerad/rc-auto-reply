@@ -19,8 +19,8 @@ export async function createContextualBarView(
     const blockID = "autoReplySettings"
 
     blocks.push(SectionBlock(
-        "*Auto-reply* allows you to automatically send customized messages in response to incoming texts.\nyou can set up personalized auto-responses to ensure that your contacts receive a prompt reply, even when you are not available to respond immediately.", "mrkdwn")
-    );
+        "*Auto-reply* is a feature that sends automated responses to incoming messages based on your customized settings.\nWith auto-reply, you can ensure that your contacts receive timely and personalized responses even when you are unable to reply immediately.\nTailor your auto-reply settings to fit your communication style and maintain meaningful engagement with your contacts.", "mrkdwn"
+      ));      
     blocks.push(DividerBlock());
 
     blocks.push(ActionsBlock(blockID, [
