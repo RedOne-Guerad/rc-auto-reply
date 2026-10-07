@@ -18,7 +18,8 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
         on: autoReplySettings?.on ?? false,
         message: autoReplySettings?.message || 'Hey, I received your message and will get back to you as soon as possible.',
         users: autoReplySettings?.users ?? [],
-        schedulers: autoReplySettings?.schedulers,
+        // 2.x stored an unused list here
+        schedulers: Array.isArray(autoReplySettings?.schedulers) ? undefined : autoReplySettings?.schedulers,
         usersLastReply: autoReplySettings?.usersLastReply ?? [],
         replyFrequency: autoReplySettings?.replyFrequency ?? String(IReplyFrequency.OnEveryMessage),
     };
