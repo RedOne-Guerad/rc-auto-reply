@@ -20,7 +20,6 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
         users: autoReplySettings?.users ?? [],
         // 2.x stored an unused list here
         schedulers: Array.isArray(autoReplySettings?.schedulers) ? undefined : autoReplySettings?.schedulers,
-        usersLastReply: autoReplySettings?.usersLastReply ?? [],
         replyFrequency: autoReplySettings?.replyFrequency ?? String(IReplyFrequency.OnEveryMessage),
     };
 }

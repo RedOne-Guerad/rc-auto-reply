@@ -16,7 +16,7 @@ export interface IScheduler {
     }
 }
 export interface IUsersLastReply {
-    user: IUser,
+    userId: string,
     lastMessage: Date,
 }
 export interface IAutoReplySettings {
@@ -24,6 +24,5 @@ export interface IAutoReplySettings {
     message: string;
     users?: IUser[],
     schedulers?: IScheduler,
-    usersLastReply?: IUsersLastReply[],
     replyFrequency: string,
   };
