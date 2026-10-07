@@ -94,7 +94,7 @@ export class SlashCommand implements ISlashCommand {
         const autoReplySettings: IAutoReplySettings = {
             ...previousSettings,
             on: true,
-            message: args.join(' '),
+            message: args.join(' ') || previousSettings.message,
         };
 
         await persis.updateByAssociation(assoc, autoReplySettings, true);
