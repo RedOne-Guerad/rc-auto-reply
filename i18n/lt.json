@@ -1,5 +1,5 @@
 {
-    "auto-reply-param-example": "enable <Jūsų žinutė čia (neprivaloma)>|disable|status|remove-user UserID",
-    "auto-reply-description": "Automatinis atsakymas leidžia vartotojams automatiškai siųsti tinkintus pranešimus atsakant į gaunamus tekstus",
+    "auto-reply-param-example": "enable <Jūsų žinutė čia (neprivaloma)>|disable|status|remove-user <ID|slapyvardis>|include-user <ID|slapyvardis>|frequency every|once|cooldown <valandos>|mentions on|off|timezone <poslinkis>|list",
+    "auto-reply-description": "Automatinis atsakymas automatiškai atsako į gaunamas asmenines žinutes (ir paminėjimus, jei įjungta) jūsų pasirinkta žinute.",
     "auto-reply-room-action-name": "💬 Automatinis atsakymas"
 }

@@ -1,5 +1,5 @@
 {
-    "auto-reply-param-example": "enable <Your away message goes here (optional)>|disable|status|remove-user UserID",
-    "auto-reply-description": "Auto-reply allows users to automatically send customized messages in response to incoming texts",
+    "auto-reply-param-example": "enable <Your away message goes here (optional)>|disable|status|remove-user <UserId|username>|include-user <UserId|username>|frequency every|once|cooldown <hours>|mentions on|off|timezone <offset>|list",
+    "auto-reply-description": "Auto-reply automatically answers incoming direct messages (and mentions, if enabled) with your custom away message.",
     "auto-reply-room-action-name": "💬 Auto Reply"
 }

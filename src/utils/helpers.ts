@@ -1,57 +1,138 @@
-import { IModify, IRead } from '@rocket.chat/apps-engine/definition/accessors';
+import { IModify, IPersistence, IRead } from '@rocket.chat/apps-engine/definition/accessors';
 import { IMessageAttachment } from '@rocket.chat/apps-engine/definition/messages';
 import { IRoom } from '@rocket.chat/apps-engine/definition/rooms';
 import { BlockBuilder } from '@rocket.chat/apps-engine/definition/uikit';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
+import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
 
 import { AutoReplyApp } from '../../AutoReplyApp';
-import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
-import { IAutoReplySettings } from './IAutoReplySettings';
+import { IAutoReplySettings, ReplyFrequency, DEFAULT_MESSAGE, DEFAULT_COOLDOWN_HOURS } from './IAutoReplySettings';
+import { AppLanguage, normalizeLanguage } from '../i18n/translations';
 
-
+export const SCHEDULER_USERS_ASSOC_ID = 'auto-reply-scheduler-users';
 
 export async function getAutoReplySettings(userId: string, read: IRead): Promise<IAutoReplySettings> {
     const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, userId);
-    const autoReplySettingsAssoc = await read.getPersistenceReader().readByAssociation(assocMe);
-    const autoReplySettings = autoReplySettingsAssoc[0] as IAutoReplySettings | undefined;
+    const records = await read.getPersistenceReader().readByAssociation(assocMe);
+    const stored = records[0] as IAutoReplySettings | undefined;
     return {
-        on: autoReplySettings?.on ?? false,
-        message: autoReplySettings?.message || 'Hey, I received your message and will get back to you as soon as possible.',
-        users: autoReplySettings?.users ?? [],
-        schedulers: autoReplySettings?.schedulers ?? [],
+        on: stored?.on ?? false,
+        message: stored?.message || DEFAULT_MESSAGE,
+        // Deleted users can linger as null entries in old records (issue #9);
+        // dropping them here heals already-affected installations on first read.
+        users: (stored?.users ?? []).filter(Boolean),
+        schedulers: stored?.schedulers ?? [],
+        frequency: stored?.frequency ?? 'every',
+        cooldownHours: stored?.cooldownHours ?? DEFAULT_COOLDOWN_HOURS,
+        replyToMentions: stored?.replyToMentions ?? false,
+        timezoneOffsetMinutes: stored?.timezoneOffsetMinutes ?? 0,
+        // missing enabledAt may deserialize as null from old records
+        enabledAt: stored?.enabledAt || undefined,
     };
 }
 
 /**
- * Copied from https://github.com/sampaiodiego/rocket.chat.app-poll/blob/4188fb6ba2b68b03d1b992735c46ee5f04fc18c8/src/lib/uuid.ts 
+ * Per-conversation tracking record for the away user, stored under the pair of
+ * associations (USER, awayUserId) + (ROOM, roomId) and shared by the reply
+ * frequency logic and the notification throttle.
  */
-export function uuid(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+export interface IChatTracking {
+    lastReplyAt?: number;
+    lastNotifyAt?: number;
 }
+
+export async function getChatTracking(awayUserId: string, roomId: string, read: IRead): Promise<IChatTracking> {
+    const assocs = chatTrackingAssocs(awayUserId, roomId);
+    const records = await read.getPersistenceReader().readByAssociations(assocs);
+    return (records[0] as IChatTracking | undefined) ?? {};
+}
+
+export async function updateChatTracking(awayUserId: string, roomId: string, tracking: IChatTracking, persistence: IPersistence): Promise<void> {
+    await persistence.updateByAssociations(chatTrackingAssocs(awayUserId, roomId), tracking as unknown as object, true);
+}
+
+function chatTrackingAssocs(awayUserId: string, roomId: string): Array<RocketChatAssociationRecord> {
+    return [
+        new RocketChatAssociationRecord(RocketChatAssociationModel.USER, awayUserId),
+        new RocketChatAssociationRecord(RocketChatAssociationModel.ROOM, roomId),
+    ];
+}
+
+/** Whether an auto-reply should be sent for this conversation right now. */
+export function shouldAutoReply(settings: IAutoReplySettings, tracking: IChatTracking, now = Date.now()): boolean {
+    const frequency: ReplyFrequency = settings.frequency ?? 'every';
+    if (frequency === 'every') {
+        return true;
+    }
+    const lastReplyAt = tracking.lastReplyAt ?? 0;
+    if (frequency === 'once') {
+        // one reply per conversation per enable period
+        return !settings.enabledAt || lastReplyAt < settings.enabledAt;
+    }
+    // cooldown counts within the current enable period: a re-enable always
+    // allows the next reply, then at most once per interval afterwards
+    if (settings.enabledAt && lastReplyAt < settings.enabledAt) {
+        return true;
+    }
+    const cooldownMs = Math.max(1, settings.cooldownHours ?? DEFAULT_COOLDOWN_HOURS) * 3600 * 1000;
+    return now - lastReplyAt >= cooldownMs;
+}
+
+/** Notification throttle: remind the away user at most once per hour per room. */
+export const NOTIFY_THROTTLE_MS = 3600 * 1000;
+
 /**
- * Sends a message using bot
- *
- * @param app
- * @param modify
- * @param room Where to send message to
- * @param user who sending the message
- * @param message What to send
- * @param attachments (optional) Message attachments (such as action buttons)
+ * E2EE rooms encrypt message content client-side; apps cannot read or send
+ * encrypted content, so the app must stay silent there (issue #8). The room
+ * document carries `encrypted: true` at runtime even though the apps-engine
+ * type does not declare it.
+ */
+export function isRoomEncrypted(room: IRoom): boolean {
+    return (room as unknown as { encrypted?: boolean }).encrypted === true;
+}
+
+/** Resolves the app language from the server's Language setting. */
+export async function getLanguage(read: IRead): Promise<AppLanguage> {
+    try {
+        const language = await read.getEnvironmentReader().getSettings().getValueById('Language');
+        return normalizeLanguage(language);
+    } catch {
+        return 'en';
+    }
+}
+
+export function newId(): string {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return require('crypto').randomUUID();
+    } catch {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+}
+
+/** Users excluded from auto-replies, keyed by id, safe against null entries. */
+export function isUserExcluded(settings: IAutoReplySettings, userId: string): boolean {
+    return (settings.users ?? []).some((user) => !!user && user.id === userId);
+}
+
+/**
+ * Sends a message as the app bot, displayed under the away user's alias.
  */
 export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
-    const botUser = (await app.getAccessors()
-        .reader.getUserReader()
-        .getAppUser(app.getID())) as IUser;
+    const botUser = await app.getAccessors().reader.getUserReader().getAppUser(app.getID());
+    if (!botUser) {
+        app.getLogger().warn('App user not found; cannot send auto-reply');
+        return;
+    }
 
     const messageStructure = modify.getCreator().startMessage()
         .setGroupable(false)
         .setSender(botUser)
-        .setUsernameAlias(user.name)
-        // .setEmojiAvatar(app.kokoEmojiAvatar)
+        .setUsernameAlias(user.name || user.username)
         .setRoom(room);
     if (message && message.length > 0) {
         messageStructure.setText(message);
@@ -65,30 +146,24 @@ export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoo
     try {
         await modify.getCreator().finish(messageStructure);
     } catch (error) {
-        app.getLogger().log(error);
+        app.getLogger().error({ msg: 'Failed to send auto-reply', error: String(error) });
     }
 }
+
 /**
- * Notifies user using bot
- *
- * @param app
- * @param modify
- * @param user Who to notify
- * @param message What to send
- * @param attachments (optional) Message attachments (such as action buttons)
+ * Notifies a user in a room (visible only to them).
  */
 export async function sendNotifyMessage(app: AutoReplyApp | undefined, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
     let botUser = user;
     if (app) {
-        botUser = (await app.getAccessors()
-            .reader.getUserReader()
-            .getAppUser(app.getID())) as IUser;
+        botUser = (await app.getAccessors().reader.getUserReader().getAppUser(app.getID())) ?? user;
     }
 
     const notifyMsgStructure = modify.getCreator().startMessage()
-        .setUsernameAlias(botUser.name).setEmojiAvatar('bell')
+        .setUsernameAlias(botUser.name || botUser.username || 'auto-reply')
+        .setEmojiAvatar('bell')
         .setSender(botUser)
-        .setRoom(room)
+        .setRoom(room);
 
     if (message && message.length > 0) {
         notifyMsgStructure.setText(message);
@@ -105,7 +180,7 @@ export async function sendNotifyMessage(app: AutoReplyApp | undefined, modify: I
     try {
         await modify.getNotifier().notifyUser(user, notifyMsgStructure.getMessage());
     } catch (error) {
-        if (app) app.getLogger().log(error);
+        if (app) app.getLogger().error({ msg: 'Failed to notify user', error: String(error) });
     }
 }
 
@@ -145,3 +220,22 @@ export const hoursOfDay = [
     { text: '10:00pm', value: '22:00' },
     { text: '11:00pm', value: '23:00' },
 ];
+
+export function timezoneOffsetOptions(): Array<{ text: string; value: string }> {
+    const options: Array<{ text: string; value: string }> = [];
+    for (let offset = -12; offset <= 14; offset++) {
+        const sign = offset >= 0 ? '+' : '-';
+        const abs = Math.abs(offset);
+        const label = `UTC${sign}${String(abs).padStart(2, '0')}:00`;
+        options.push({ text: label, value: String(offset * 60) });
+    }
+    return options;
+}
+
+export function formatOffsetMinutes(minutes: number): string {
+    const sign = minutes >= 0 ? '+' : '-';
+    const abs = Math.abs(minutes);
+    const h = Math.floor(abs / 60);
+    const m = abs % 60;
+    return `UTC${sign}${String(h).padStart(2, '0')}:${m ? String(m).padStart(2, '0') : '00'}`;
+}
