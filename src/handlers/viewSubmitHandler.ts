@@ -127,7 +127,6 @@ export class ViewSubmitHandler {
         if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
             await this.persistence.updateByAssociation(assocMe, previousSettings, true);
         }
-        console.log(previousSettings);
 
         return { success: true };
     }

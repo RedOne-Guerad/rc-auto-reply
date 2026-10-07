@@ -24,7 +24,6 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         // ToDo:
         // auto-respond to rooms beside direct messages
         // when user is tagged by someone
-        this.getLogger().log(message.room.type, RoomType.DIRECT_MESSAGE);
         return message.room.type === RoomType.DIRECT_MESSAGE;
     }
 
