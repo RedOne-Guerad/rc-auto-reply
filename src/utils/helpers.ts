@@ -69,6 +69,11 @@ export function shouldAutoReply(settings: IAutoReplySettings, tracking: IChatTra
         // one reply per conversation per enable period
         return !settings.enabledAt || lastReplyAt < settings.enabledAt;
     }
+    // cooldown counts within the current enable period: a re-enable always
+    // allows the next reply, then at most once per interval afterwards
+    if (settings.enabledAt && lastReplyAt < settings.enabledAt) {
+        return true;
+    }
     const cooldownMs = Math.max(1, settings.cooldownHours ?? DEFAULT_COOLDOWN_HOURS) * 3600 * 1000;
     return now - lastReplyAt >= cooldownMs;
 }

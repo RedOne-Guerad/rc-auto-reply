@@ -65,8 +65,10 @@ create_user carol Carol
 set_setting() { # set_setting <id> <value-json>
     curl -s "$URL/api/v1/settings/$1" "${AUTH[@]}" -d "{\"value\": $2}" | head -c 150; echo
 }
-say "Disabling email 2FA (blocks scripted logins), marking setup complete, enabling E2EE ..."
+say "Disabling email 2FA (blocks scripted logins), REST rate limiter (blocks test polling), marking setup complete, enabling E2EE ..."
 set_setting "Accounts_TwoFactorAuthentication_Enabled" false
+set_setting "API_Enable_Rate_Limiter" false
+set_setting "API_Enable_Rate_Limiter_Dev" false
 set_setting "Show_Setup_Wizard" '"completed"'
 set_setting "E2E_Enable" true
 

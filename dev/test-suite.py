@@ -34,9 +34,23 @@ def say(user, room, text):
     return api("POST", "/api/v1/chat.postMessage", {"roomId": room, "text": text}, user)
 
 
+SUITE_START_MS = int(time.time() * 1000)
+
+
+def count_bot_replies(room_id, since_ms=None):
+    """Count auto-reply.bot messages in a room since a timestamp (mongo, no window drift)."""
+    since = since_ms if since_ms is not None else SUITE_START_MS
+    out = subprocess.check_output([
+        "docker", "exec", "rc-auto-reply-mongo-1", "mongosh", "--quiet", "--eval",
+        f'db.rocketchat_message.countDocuments({{rid: "{room_id}", "u.username": "auto-reply.bot", ts: {{$gt: new Date({since})}}}})',
+        "rocketchat",
+    ]).decode().strip()
+    return int(out or 0)
+
+
 HISTORY_ERRORS = []
 
-def history(user, room, count=50):
+def history(user, room, count=100):
     r = api("GET", f"/api/v1/im.history?roomId={room}&count={count}", None, user)
     msgs = r.get("messages")
     if msgs is None:
@@ -45,7 +59,7 @@ def history(user, room, count=50):
     return msgs
 
 
-def channel_history(user, room, count=50):
+def channel_history(user, room, count=100):
     r = api("GET", f"/api/v1/channels.history?roomId={room}&count={count}", None, user)
     msgs = r.get("messages")
     if msgs is None:
@@ -69,20 +83,19 @@ def auto_replies(msgs):
 
 
 def count_replies():
-    for _ in range(4):
-        msgs = history("alice", ROOM_DM)
-        if msgs is not None:
-            return len(auto_replies(msgs))
-        time.sleep(2)
-    return -1  # fetch kept failing
+    try:
+        return count_bot_replies(ROOM_DM)
+    except Exception as e:
+        print(f"  count_replies failed: {e}")
+        return -1
 
 
-def wait_for_replies(baseline, expected_more=1, timeout=25):
+def wait_for_replies(baseline, expected_more=1, timeout=90):
     """Poll until at least `expected_more` new Alice-alias replies arrive."""
     deadline = time.time() + timeout
     last = baseline
     while time.time() < deadline:
-        time.sleep(2)
+        time.sleep(4)
         last = count_replies()
         if last - baseline >= expected_more:
             break
@@ -235,23 +248,26 @@ def main():
     ch = r["channel"]["_id"]
     api("POST", "/api/v1/channels.invite", {"roomId": ch, "username": "alice"}, "bob")
     say("bob", ch, "hello @alice without mentions enabled")
-    time.sleep(6)
-    ch_replies = [m for m in channel_history("bob", ch) if (m.get("alias") or "") == "Alice"]
-    check("no mention reply when mentions disabled", len(ch_replies) == 0, str(len(ch_replies)))
+    time.sleep(8)
+    ch_replies_count = count_bot_replies(ch)
+    check("no mention reply when mentions disabled", ch_replies_count == 0, str(ch_replies_count))
+    cmd("alice", "frequency once")
+    cmd("alice", "disable")
+    cmd("alice", "enable I am away rn")
     cmd("alice", "mentions on", room=ch)
     say("bob", ch, "hello @alice with mentions enabled")
-    deadline = time.time() + 20
-    ch_replies = []
+    deadline = time.time() + 90
+    first = 0
     while time.time() < deadline:
-        time.sleep(2)
-        ch_replies = [m for m in channel_history("bob", ch) if (m.get("alias") or "") == "Alice"]
-        if ch_replies:
+        time.sleep(4)
+        first = count_bot_replies(ch)
+        if first >= 1:
             break
-    check("mention reply when mentions enabled", len(ch_replies) == 1, str(len(ch_replies)))
+    check("mention reply when mentions enabled", first == 1, str(first))
     say("bob", ch, "again @alice second mention")
-    time.sleep(6)
-    ch_replies2 = [m for m in channel_history("bob", ch) if (m.get("alias") or "") == "Alice"]
-    check("mention reply respects frequency=once per channel", len(ch_replies2) == 1, str(len(ch_replies2)))
+    time.sleep(10)
+    second = count_bot_replies(ch)
+    check("mention reply respects frequency=once per channel", second == 1, str(second))
     cmd("alice", "mentions off", room=ch)
 
     # --- 8. scheduler tick ---

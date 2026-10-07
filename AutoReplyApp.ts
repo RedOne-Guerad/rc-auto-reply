@@ -73,7 +73,9 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 return;
             }
             const room = message.room;
-            if (!room || isRoomEncrypted(room)) {
+            // E2EE safety net: even if the room flag is not propagated to the
+            // apps-engine room object, encrypted messages carry type 'e2e'
+            if (!room || isRoomEncrypted(room) || message.type === 'e2e') {
                 return;
             }
 
