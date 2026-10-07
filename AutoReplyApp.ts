@@ -11,295 +11,471 @@ import { IMessage, IMessageAttachment, IPostMessageSent, MessageActionButtonsAli
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
 import { RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
+import { StartupType } from '@rocket.chat/apps-engine/definition/scheduler';
 
-import { IAutoReplySettings, SchedulerType } from './src/utils/IAutoReplySettings';
+import { IAutoReplySettings, IScheduler, ReplyFrequency, SchedulerType } from './src/utils/IAutoReplySettings';
 import { AutoReplyCommand } from './src/AutoReplyCommand';
 import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/definition/ui';
 import { IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
-import { getAutoReplySettings, sendMessage, sendNotifyMessage, uuid } from './src/utils/helpers';
-import { createContextualBarView } from './src/modals/createContextualBarView';
+import {
+    getAutoReplySettings,
+    sendMessage,
+    sendNotifyMessage,
+    getLanguage,
+    getChatTracking,
+    updateChatTracking,
+    shouldAutoReply,
+    isUserExcluded,
+    isRoomEncrypted,
+    NOTIFY_THROTTLE_MS,
+    newId,
+} from './src/utils/helpers';
+import { createContextualBarView, IContextualBarContext } from './src/modals/createContextualBarView';
 import { createSchedulerModal } from './src/modals/createSchedulerModal';
+import { SCHEDULER_TICK_PROCESSOR_ID, SCHEDULER_TICK_INTERVAL, desiredStateFromSchedulers, getSchedulerUserIds, syncSchedulerRegistry } from './src/scheduler';
+import { AppLanguage, translate } from './src/i18n/translations';
+
+const SETTINGS_BLOCK = 'autoReplySettings';
 
 export class AutoReplyApp extends App implements IPostMessageSent {
 
     public async checkPostMessageSent(message: IMessage, read: IRead, http: IHttp): Promise<boolean> {
-        // ToDo:
-        // auto-respond to rooms beside direct messages
-        // when user is tagged by someone
-        this.getLogger().log(message.room.type, RoomType.DIRECT_MESSAGE);
-        return message.room.type === RoomType.DIRECT_MESSAGE;
+        const room = message.room;
+        if (!room) {
+            return false;
+        }
+        // Apps cannot send encrypted content; never reply in E2EE rooms (issue #8)
+        if (isRoomEncrypted(room)) {
+            return false;
+        }
+        if (room.type === RoomType.DIRECT_MESSAGE) {
+            return true;
+        }
+        if (room.type === RoomType.CHANNEL || room.type === RoomType.PRIVATE_GROUP) {
+            // only potentially interesting when someone is @mentioned
+            return /(?:^|\s)@[a-z0-9._-]+/i.test(message.text ?? '');
+        }
+        return false;
     }
 
     /**
-    * Executes after a message is sent and checks if it's a match for auto-reply.
-    * @param {IMessage} message - Rocket.Chat's instance
-    * @param {IRead} read - Rocket.Chat's read instance
-    * @param {IHttp} http - Rocket.Chat's http instance
-    * @param {IPersistence} persistence - Rocket.Chat's persistence instance
-    * @param {IModify} modify - Rocket.Chat's modify instance
-    */
+     * Executes after a message is sent and sends auto-replies when the
+     * recipient (DM) or a mentioned user (channels) has auto-reply enabled.
+     */
     public async executePostMessageSent(message: IMessage, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<void> {
-        const botUser = (await this.getAccessors()
-        .reader.getUserReader()
-        .getAppUser(this.getID())) as IUser;
+        try {
+            const botUser = await this.getAccessors().reader.getUserReader().getAppUser(this.getID());
+            if (!botUser) {
+                return;
+            }
+            // never react to our own messages (loop prevention)
+            if (message.sender.id === botUser.id || message.sender.username === botUser.username) {
+                return;
+            }
+            const room = message.room;
+            if (!room || isRoomEncrypted(room)) {
+                return;
+            }
 
-        // if the message was sent from AutoReply
-        if (message.sender.username === botUser.username) return
-        // If my AutoReply is enabled and I am typing, need to offer an option to disable it
+            if (room.type === RoomType.DIRECT_MESSAGE) {
+                await this.handleDirectMessage(message, read, persistence, modify);
+                return;
+            }
+            if (room.type === RoomType.CHANNEL || room.type === RoomType.PRIVATE_GROUP) {
+                await this.handleChannelMention(message, read, persistence, modify, botUser);
+                return;
+            }
+        } catch (error) {
+            this.getLogger().error({ msg: 'executePostMessageSent failed', error: String(error) });
+        }
+    }
+
+    private async handleDirectMessage(message: IMessage, read: IRead, persistence: IPersistence, modify: IModify): Promise<void> {
         const me = message.sender;
-        const MyAutoReplySettings = await getAutoReplySettings(me.id, read)
-
-
-        const otherUserIds = message.room.userIds ?? [];
-        if (otherUserIds == undefined) {
-            // We don't care if there isn't one other person in the room
+        const otherUserIds = (message.room.userIds ?? []).filter((u) => u !== me.id);
+        if (otherUserIds.length !== 1) {
             return;
         }
-        const otherUsers = otherUserIds.filter((u) => u !== message.sender.id);
-        if (otherUsers.length !== 1) {
-            // We don't care if there isn't one other person in the room
+        // the other user may have been deleted since the room was created
+        const otherUser = await read.getUserReader().getById(otherUserIds[0]);
+        if (!otherUser) {
             return;
         }
-        const otherUser = await read.getUserReader().getById(otherUsers[0]);
-        const { id: otherUserId } = otherUser;
-        if (MyAutoReplySettings.on) {
 
-            // OtherUser is excluded?
-            // dont notify me
-            if (MyAutoReplySettings.users?.findIndex(user => user.id === otherUserId) !== -1) return
+        const mySettings = await getAutoReplySettings(me.id, read);
 
-            // My auto-reply is enabled
-            // Notify me with options to disable or cotinue using auto-reply
-            if (MyAutoReplySettings.on) {
-
-                const disableAutoReplyAction = () => ({
-                    text: 'Yes',
-                    type: MessageActionType.BUTTON,
-                    msg_in_chat_window: true,
-                    msg: '/auto-reply disable',
-                });
-
-                const disableAutoReplyForUserAction = (userId: string) => ({
-                    text: 'Disable for this user',
-                    type: MessageActionType.BUTTON,
-                    msg_in_chat_window: true,
-                    msg: `/auto-reply remove-user ${userId}`,
-                });
-
-                const continueUsingAutoReplyAction = () => ({
-                    text: 'No',
-                    type: MessageActionType.BUTTON,
-                    msg_in_chat_window: true,
-                    msg: '/auto-reply status',
-                });
-
-                const text = '`auto reply` is enabled. Would you like to disable it?';
+        // If my auto-reply is on while I am typing, offer to disable it (throttled)
+        if (mySettings.on && !isUserExcluded(mySettings, otherUser.id)) {
+            const tracking = await getChatTracking(me.id, message.room.id, read);
+            if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
+                const lang = await getLanguage(read);
                 const attachment = {
                     actionButtonsAlignment: MessageActionButtonsAlignment.HORIZONTAL,
                     actions: [
-                        disableAutoReplyAction(),
-                        disableAutoReplyForUserAction(otherUserId),
-                        continueUsingAutoReplyAction(),
+                        {
+                            text: translate('notify_btn_yes', lang),
+                            type: MessageActionType.BUTTON,
+                            msg_in_chat_window: true,
+                            msg: '/auto-reply disable',
+                        },
+                        {
+                            text: translate('notify_btn_disable_for_user', lang),
+                            type: MessageActionType.BUTTON,
+                            msg_in_chat_window: true,
+                            msg: `/auto-reply remove-user ${otherUser.id}`,
+                        },
+                        {
+                            text: translate('notify_btn_no', lang),
+                            type: MessageActionType.BUTTON,
+                            msg_in_chat_window: true,
+                            msg: '/auto-reply status',
+                        },
                     ],
                 } as IMessageAttachment;
-
-                await sendNotifyMessage(this, modify, message.room, message.sender, text, [attachment]);
+                await sendNotifyMessage(this, modify, message.room, me, translate('notify_enabled_prompt', lang), [attachment]);
+                tracking.lastNotifyAt = Date.now();
+                await updateChatTracking(me.id, message.room.id, tracking, persistence);
             }
         }
-        // check if OtherUser enabled auto-reply
-        const OtherAutoReplySettings = await getAutoReplySettings(otherUserId, read)
 
-        if (OtherAutoReplySettings.on) {
-            // OtherUser auto-reply not enabled
-            if (!OtherAutoReplySettings.on) return
-            // OtherUser excluded me?
-            // dont send me auto-reply message
-            if (OtherAutoReplySettings.users?.findIndex(user => user.id === me.id) !== -1) return
-            // auto-reply enabled, send auto-reply message
-            await sendMessage(this, modify, message.room, otherUser, OtherAutoReplySettings.message);
+        // auto-reply from the other user, if enabled for me
+        const otherSettings = await getAutoReplySettings(otherUser.id, read);
+        if (!otherSettings.on || isUserExcluded(otherSettings, me.id)) {
+            return;
         }
-        // The user is not marked as away
-        return;
-
+        const tracking = await getChatTracking(otherUser.id, message.room.id, read);
+        if (!shouldAutoReply(otherSettings, tracking)) {
+            return;
+        }
+        await sendMessage(this, modify, message.room, otherUser, otherSettings.message);
+        tracking.lastReplyAt = Date.now();
+        await updateChatTracking(otherUser.id, message.room.id, tracking, persistence);
     }
-    /**
-    * Extends the Rocket.Chat configuration with a new button in the UI and a new slash command
-    * @param configuration The Rocket.Chat configuration to extend
-    * @param environmentRead The environment reader
-    */
-    protected async extendConfiguration(configuration: IConfigurationExtend, environmentRead: IEnvironmentRead): Promise<void> {
 
+    private async handleChannelMention(message: IMessage, read: IRead, persistence: IPersistence, modify: IModify, botUser: IUser): Promise<void> {
+        const sender = message.sender;
+        const mentioned = parseMentionedUsernames(message.text ?? '');
+        if (mentioned.length === 0) {
+            return;
+        }
+        const lang = await getLanguage(read);
+        for (const username of mentioned) {
+            let mentionedUser: IUser | undefined;
+            try {
+                mentionedUser = await read.getUserReader().getByUsername(username) ?? undefined;
+            } catch {
+                continue;
+            }
+            if (!mentionedUser || mentionedUser.id === sender.id || mentionedUser.id === botUser.id) {
+                continue;
+            }
+            const settings = await getAutoReplySettings(mentionedUser.id, read);
+            if (!settings.on || !settings.replyToMentions || isUserExcluded(settings, sender.id)) {
+                continue;
+            }
+            const tracking = await getChatTracking(mentionedUser.id, message.room.id, read);
+            if (shouldAutoReply(settings, tracking)) {
+                await sendMessage(this, modify, message.room, mentionedUser, settings.message);
+                tracking.lastReplyAt = Date.now();
+                await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
+            }
+            if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
+                const attachment = {
+                    actionButtonsAlignment: MessageActionButtonsAlignment.HORIZONTAL,
+                    actions: [
+                        {
+                            text: translate('notify_btn_yes', lang),
+                            type: MessageActionType.BUTTON,
+                            msg_in_chat_window: true,
+                            msg: '/auto-reply disable',
+                        },
+                        {
+                            text: translate('notify_btn_no', lang),
+                            type: MessageActionType.BUTTON,
+                            msg_in_chat_window: true,
+                            msg: '/auto-reply status',
+                        },
+                    ],
+                } as IMessageAttachment;
+                await sendNotifyMessage(this, modify, message.room, mentionedUser, translate('notify_enabled_prompt', lang), [attachment]);
+                tracking.lastNotifyAt = Date.now();
+                await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
+            }
+        }
+    }
+
+    /**
+     * Registers the UI room-action button, the slash command and the
+     * scheduler tick processor.
+     */
+    protected async extendConfiguration(configuration: IConfigurationExtend, environmentRead: IEnvironmentRead): Promise<void> {
         configuration.ui.registerButton({
             actionId: 'auto-reply-room-action-id',
             labelI18n: 'auto-reply-room-action-name',
-            context: UIActionButtonContext.ROOM_ACTION, //.MESSAGE_ACTION, // in what context the action button will be displayed in the UI
-            // If you want to choose `when` the button should be displayed
+            context: UIActionButtonContext.ROOM_ACTION,
             when: {
                 roomTypes: [
                     RoomTypeFilter.DIRECT,
+                    RoomTypeFilter.PUBLIC_CHANNEL,
+                    RoomTypeFilter.PRIVATE_CHANNEL,
                 ],
-                // hasOnePermission: ['create-d'],
-                // hasAllRoles: ['admin', 'moderator'],
-            }
+            },
         });
         await configuration.slashCommands.provideSlashCommand(new AutoReplyCommand());
 
+        await configuration.scheduler.registerProcessors([{
+            id: SCHEDULER_TICK_PROCESSOR_ID,
+            startupSetting: {
+                type: StartupType.RECURRING,
+                interval: SCHEDULER_TICK_INTERVAL,
+                data: {},
+            },
+            processor: async (_jobContext, read, _modify, _http, persis) => {
+                await this.runSchedulerTick(read, persis);
+            },
+        }]);
     }
-    /**
-    * Handles button clicks in a message's attachment or a sidebar item.
-    * @param {UIKitActionButtonInteractionContext} context - The context of the block interaction
-    * @param {IRead} read - Rocket.Chat's read instance
-    * @param {IHttp} http - Rocket.Chat's http instance
-    * @param {IPersistence} persistence - Rocket.Chat's persistence instance
-    * @param {IModify} modify - Rocket.Chat's modify instance
-    * @returns A response object to send to Rocket.Chat that specifies how to update the UI.
-    */
-    public async executeActionButtonHandler(context: UIKitActionButtonInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
-        const {
-            actionId,
-            user,
-            room,
-        } = context.getInteractionData();
 
-        const data = context.getInteractionData()
+    /** Recomputes on/off from every registered user's schedulers. */
+    private async runSchedulerTick(read: IRead, persistence: IPersistence): Promise<void> {
+        const userIds = await getSchedulerUserIds(read);
+        for (const userId of userIds) {
+            try {
+                const settings = await getAutoReplySettings(userId, read);
+                const desired = desiredStateFromSchedulers(settings);
+                if (desired === undefined || desired === settings.on) {
+                    continue;
+                }
+                settings.on = desired;
+                settings.enabledAt = desired ? Date.now() : settings.enabledAt;
+                const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, userId);
+                await persistence.updateByAssociation(assoc, settings, true);
+                this.getLogger().debug({ msg: 'scheduler toggled auto-reply', userId, on: desired });
+            } catch (error) {
+                this.getLogger().error({ msg: 'scheduler tick failed for user', userId, error: String(error) });
+            }
+        }
+    }
+
+    /** Opens the contextual bar from the room "Apps" action. */
+    public async executeActionButtonHandler(context: UIKitActionButtonInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
+        const { actionId, user, room } = context.getInteractionData();
+
         if (actionId === 'auto-reply-room-action-id') {
-            // get auto-reply settings for this user
-            const autoReplySettings = await getAutoReplySettings(user.id, read)
-            const modal = await createContextualBarView(undefined, read, http, persistence, modify, autoReplySettings);
+            const autoReplySettings = await getAutoReplySettings(user.id, read);
+            const barContext = await this.buildBarContext(user, room, read);
+            const modal = await createContextualBarView(undefined, read, http, persistence, modify, autoReplySettings, barContext);
             return context.getInteractionResponder().openContextualBarViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
     }
 
-    /**
-    * Implements the submit of a view
-    * @param {UIKitViewSubmitInteractionContext} context - The context of the block interaction
-    * @param {IRead} read - Rocket.Chat's read instance
-    * @param {IHttp} http - Rocket.Chat's http instance
-    * @param {IPersistence} persistence - Rocket.Chat's persistence instance
-    * @param {IModify} modify - Rocket.Chat's modify instance
-    * @returns An IUIKitResponse with the results of the interaction
-    */
-    public async executeViewSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
-        const interactionData = context.getInteractionData()
-        const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
-        const { autoReplySettings, autoReplySchedulerDaily }: {
-            autoReplySettings: {
-                EnableApp?: string,
-                DisableApp?: string,
-                ExcludeUsers?: Array<string>,
-                AutoReplyMessage?: string,
-            },
-            autoReplySchedulerDaily: {
-                EnableTime?: string,
-                DisableTime?: string
+    private async buildBarContext(user: IUser, room: { id: string; userIds?: Array<string> } | undefined, read: IRead): Promise<IContextualBarContext> {
+        const language = await getLanguage(read);
+        let dmPeer: IUser | undefined;
+        if (room?.userIds) {
+            const otherIds = room.userIds.filter((id) => id !== user.id);
+            if (otherIds.length === 1) {
+                dmPeer = await read.getUserReader().getById(otherIds[0]) ?? undefined;
             }
-        } = interactionData.view.state as any;
-
-        if(autoReplySchedulerDaily) return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify)
-
-
-        const action = () => {
-            if (autoReplySettings.EnableApp === undefined && autoReplySettings.DisableApp && autoReplySettings.DisableApp === 'Disable') return false
-            if (autoReplySettings.DisableApp === undefined && autoReplySettings.EnableApp && autoReplySettings.EnableApp === 'Enable') return true
-            return undefined
         }
-        // No changes do nothing
-        const noChanges = action() === undefined && autoReplySettings.AutoReplyMessage === undefined && autoReplySettings.ExcludeUsers === undefined;
-        if (noChanges) {
-            return { success: false };
+        return { language, dmPeer };
+    }
+
+    /**
+     * Handles view submits, routed by the shape of the view state:
+     * settings bar, daily scheduler modal or weekly scheduler modal.
+     */
+    public async executeViewSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
+        const interactionData = context.getInteractionData();
+        const state = (interactionData.view.state ?? {}) as Record<string, any>;
+
+        try {
+            if (state.autoReplySchedulerDaily) {
+                return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify, SchedulerType.Daily);
+            }
+            if (state.autoReplyScheduler) {
+                return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify, SchedulerType.Weekly);
+            }
+            if (state.autoReplySettings) {
+                return await this.executeSettingsSubmitHandler(context, read, persistence, modify);
+            }
+            return context.getInteractionResponder().successResponse();
+        } catch (error) {
+            this.getLogger().error({ msg: 'view submit failed', error: String(error) });
+            return context.getInteractionResponder().successResponse();
+        }
+    }
+
+    private async executeSettingsSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
+        const interactionData = context.getInteractionData();
+        const submitted = ((interactionData.view.state ?? {}) as Record<string, any>).autoReplySettings ?? {};
+        const previous = await getAutoReplySettings(interactionData.user.id, read);
+
+        const enabledClicked = submitted.EnableApp === 'Enable';
+        const disabledClicked = submitted.DisableApp === 'Disable';
+        const on = enabledClicked ? true : disabledClicked ? false : previous.on;
+        const enabledAt = enabledClicked && !previous.on ? Date.now() : previous.enabledAt;
+
+        const messageText = typeof submitted.AutoReplyMessage === 'string' ? submitted.AutoReplyMessage.trim() : '';
+        const frequency = selectValue(submitted.Frequency) as ReplyFrequency | undefined;
+        const cooldownRaw = Number(submitted.CooldownHours);
+        const mentionsValue = selectValue(submitted.ReplyToMentions);
+        const timezoneValue = Number(selectValue(submitted.TimezoneOffset));
+
+        // Deleted users must not end up in the exclusion list again (issue #9)
+        const excludedUsers: IUser[] = [];
+        if (Array.isArray(submitted.ExcludeUsers)) {
+            for (const id of submitted.ExcludeUsers) {
+                const user = await read.getUserReader().getById(id);
+                if (user) {
+                    excludedUsers.push(user);
+                }
+            }
         }
 
-        // Get the previous auto-reply settings if they exist. 
-        const previousSettings = await getAutoReplySettings(interactionData.user.id, read);
-
-        const excludeUsers = async (): Promise<IUser[]> => {
-            const userPromises = (autoReplySettings.ExcludeUsers ?? previousSettings?.users?.map((user: IUser) => user.id) ?? []).map(id => read.getUserReader().getById(id));
-            const users = await Promise.all(userPromises);
-            return users.filter((user: IUser): user is IUser => user !== undefined);
+        const settings: IAutoReplySettings = {
+            on,
+            enabledAt,
+            message: messageText || previous.message,
+            users: Array.isArray(submitted.ExcludeUsers) ? excludedUsers : previous.users,
+            schedulers: previous.schedulers,
+            frequency: frequency ?? previous.frequency,
+            cooldownHours: Number.isFinite(cooldownRaw) && cooldownRaw > 0 ? Math.round(cooldownRaw) : previous.cooldownHours,
+            replyToMentions: mentionsValue === 'on' ? true : mentionsValue === 'off' ? false : previous.replyToMentions,
+            timezoneOffsetMinutes: Number.isFinite(timezoneValue) && timezoneValue >= -720 && timezoneValue <= 840 ? timezoneValue : previous.timezoneOffsetMinutes,
         };
 
-        // Get the new auto-reply settings. 
-        const state: IAutoReplySettings = {
-            on: action() ?? previousSettings?.on ?? false,
-            message: autoReplySettings.AutoReplyMessage || previousSettings?.message,
-            users: await excludeUsers() ?? [],
-            schedulers: previousSettings?.schedulers
-        }
-
-        await persistence.updateByAssociation(assocMe, state, true);
+        const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
+        await persistence.updateByAssociation(assoc, settings, true);
+        await syncSchedulerRegistry(interactionData.user.id, settings, persistence, read);
 
         if (interactionData.room) {
-            const notifyMsg = autoReplySettings.DisableApp ? '*Auto-Reply* is Disabled' : '*Auto-Reply* is Enabled, with the follwing message:\n' + state.message
+            const lang = await getLanguage(read);
+            const notifyMsg = on
+                ? translate('notify_ar_enabled', lang) + settings.message
+                : translate('notify_ar_disabled', lang);
             await sendNotifyMessage(this, modify, interactionData.room, interactionData.user, notifyMsg);
         }
-
-        return {
-            success: true,
-        };
+        return context.getInteractionResponder().successResponse();
     }
 
-    public async executeAddSchedulerSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
-        const interactionData = context.getInteractionData()
-        const { autoReplySchedulerDaily }: {
-            autoReplySchedulerDaily: {
-                EnableTime?: string,
-                DisableTime?: string,
-                Message?: string
-            }
-        } = interactionData.view.state as any;
-        // Get the previous auto-reply settings if they exist. 
-        const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
-        const previousSettings = await getAutoReplySettings(interactionData.user.id, read);
+    private async executeAddSchedulerSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify, type: SchedulerType): Promise<IUIKitResponse> {
+        const interactionData = context.getInteractionData();
+        const state = (interactionData.view.state ?? {}) as Record<string, any>;
 
-        if(autoReplySchedulerDaily && autoReplySchedulerDaily.EnableTime && autoReplySchedulerDaily.DisableTime){
-            previousSettings.schedulers?.push({
-                id: uuid(),
-                settings: {
-                    enableTime: autoReplySchedulerDaily.EnableTime,
-                    disableTime: autoReplySchedulerDaily.DisableTime,
-                    message: autoReplySchedulerDaily.Message || previousSettings.message
-                },
-                type: SchedulerType.Daily
-            })
-            const modal = await createContextualBarView(interactionData.view.submit?.value, read, http, persistence, modify, previousSettings)
-            if(context.getInteractionResponder().updateContextualBarViewResponse(modal).success)
-                await persistence.updateByAssociation(assocMe, previousSettings, true);
+        let enableTime: string | undefined;
+        let disableTime: string | undefined;
+        let weekdays: string[] | undefined;
+        let message: string | undefined;
+
+        if (type === SchedulerType.Daily) {
+            const daily = state.autoReplySchedulerDaily ?? {};
+            enableTime = selectValue(daily.EnableTime);
+            disableTime = selectValue(daily.DisableTime);
+            message = typeof daily.Message === 'string' && daily.Message.trim() ? daily.Message : undefined;
+        } else {
+            const weekly = state.autoReplyScheduler ?? {};
+            enableTime = selectValue(weekly.StartSchedulerHour);
+            disableTime = selectValue(weekly.EndSchedulerHour);
+            weekdays = multiValue(weekly.SchedulerDays);
         }
-        return {
-            success: true,
+
+        if (!enableTime || !disableTime) {
+            return context.getInteractionResponder().successResponse();
+        }
+
+        const previous = await getAutoReplySettings(interactionData.user.id, read);
+        const scheduler: IScheduler = {
+            id: newId(),
+            type,
+            settings: { enableTime, disableTime, weekdays, message },
         };
+        const settings: IAutoReplySettings = {
+            ...previous,
+            schedulers: [...(previous.schedulers ?? []), scheduler],
+        };
+
+        const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
+        await persistence.updateByAssociation(assoc, settings, true);
+        await syncSchedulerRegistry(interactionData.user.id, settings, persistence, read);
+
+        // refresh the contextual bar it was opened from, if still open
+        try {
+            const barContext = await this.buildBarContext(interactionData.user, undefined, read);
+            const modal = await createContextualBarView(interactionData.view.submit?.value, read, http, persistence, modify, settings, barContext);
+            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
+        } catch {
+            return context.getInteractionResponder().successResponse();
+        }
     }
 
     /**
-    * Handles the execution of a block action, such as clicking a button.
-    * @param {UIKitBlockInteractionContext} context - The context of the block interaction
-    * @param {IRead} read - Rocket.Chat's read instance
-    * @param {IHttp} http - Rocket.Chat's http instance
-    * @param {IPersistence} persistence - Rocket.Chat's persistence instance
-    * @param {IModify} modify - Rocket.Chat's modify instance
-    * @returns {Promise<any>} A promise that resolves with the result of the execution
-    */
+     * Handles block actions: enable/disable toggles, scheduler add and remove.
+     */
     public async executeBlockActionHandler(context: UIKitBlockInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<any> {
         const data = context.getInteractionData();
-        // get auto-reply settings for this user
-        const autoReplySettings = await getAutoReplySettings(data.user.id, read);
+        const settings = await getAutoReplySettings(data.user.id, read);
+        const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, data.user.id);
+        const barContext = await this.buildBarContext(data.user, data.room, read);
+
         if (data.actionId === 'EnableApp') {
-            autoReplySettings.on = true;
-            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, autoReplySettings)
+            settings.on = true;
+            settings.enabledAt = Date.now();
+            await persistence.updateByAssociation(assoc, settings, true);
+            await syncSchedulerRegistry(data.user.id, settings, persistence, read);
+            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
             return context.getInteractionResponder().updateContextualBarViewResponse(modal);
         }
         if (data.actionId === 'DisableApp') {
-            autoReplySettings.on = false;
-            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, autoReplySettings)
+            settings.on = false;
+            await persistence.updateByAssociation(assoc, settings, true);
+            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
             return context.getInteractionResponder().updateContextualBarViewResponse(modal);
         }
         if (data.actionId === 'AddScheduler') {
-            const modal = await createSchedulerModal(data.container.id, modify, SchedulerType[data.value || 'Daily'], autoReplySettings)
-            return  context.getInteractionResponder().openModalViewResponse(modal);
+            const schedulerType = SchedulerType.Daily === data.value ? SchedulerType.Daily
+                : SchedulerType.Weekly === data.value ? SchedulerType.Weekly
+                : SchedulerType.Daily;
+            const modal = await createSchedulerModal(data.container.id, modify, schedulerType, settings, barContext.language);
+            return context.getInteractionResponder().openModalViewResponse(modal);
         }
-        return {
-            success: true,
-        };
+        if (data.actionId === 'RemoveScheduler') {
+            const index = Number(data.value);
+            if (Number.isInteger(index) && index >= 0 && index < (settings.schedulers ?? []).length) {
+                settings.schedulers = (settings.schedulers ?? []).filter((_, i) => i !== index);
+                await persistence.updateByAssociation(assoc, settings, true);
+                await syncSchedulerRegistry(data.user.id, settings, persistence, read);
+            }
+            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
+            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
+        }
+        return context.getInteractionResponder().successResponse();
     }
+}
+
+/** UIKit state values may arrive as plain strings or wrapped option objects. */
+function selectValue(state: any): string | undefined {
+    if (state == null) return undefined;
+    if (typeof state === 'string') return state;
+    if (typeof state === 'object' && typeof state.value === 'string') return state.value;
+    return undefined;
+}
+
+function multiValue(state: any): string[] | undefined {
+    if (state == null) return undefined;
+    if (Array.isArray(state)) return state.map((v) => selectValue(v)).filter((v): v is string => !!v);
+    const single = selectValue(state);
+    return single ? [single] : undefined;
+}
+
+function parseMentionedUsernames(text: string): string[] {
+    const mentioned = new Set<string>();
+    for (const match of text.matchAll(/(?:^|\s)@([a-z0-9._-]+)/gi)) {
+        const username = match[1].toLowerCase();
+        if (username !== 'all' && username !== 'here') {
+            mentioned.add(username);
+        }
+    }
+    return Array.from(mentioned);
 }

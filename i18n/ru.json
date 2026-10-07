@@ -1,5 +1,5 @@
 {
-    "auto-reply-param-example": "enable <Здесь будет ваше сообщение об отсутствии (необязательно)>|disable|status|remove-user UserID",
-    "auto-reply-description": "Автоответ позволяет пользователям автоматически отправлять персонализированные сообщения в ответ на входящие сообщения.",
+    "auto-reply-param-example": "enable <Здесь будет ваше сообщение об отсутствии (необязательно)>|disable|status|remove-user <ID|имя>|include-user <ID|имя>|frequency every|once|cooldown <часы>|mentions on|off|timezone <смещение>|list",
+    "auto-reply-description": "Автоответ автоматически отвечает на входящие личные сообщения (и на упоминания, если включено) вашим сообщением об отсутствии.",
     "auto-reply-room-action-name": "💬 Автоответ"
 }

@@ -1,114 +1,108 @@
 import { IModify } from "@rocket.chat/apps-engine/definition/accessors";
-import { daysOfWeek, hoursOfDay, uuid } from "../utils/helpers";
+import { daysOfWeek, hoursOfDay, newId } from "../utils/helpers";
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
-import { IAutoReplySettings, IScheduler, SchedulerType } from "../utils/IAutoReplySettings";
+import { IAutoReplySettings, SchedulerType } from "../utils/IAutoReplySettings";
+import { AppLanguage, translate } from "../i18n/translations";
 
-
-export async function createSchedulerModal(cxtViewID: string, modify: IModify, schedulerType: SchedulerType, autoReplySettings: IAutoReplySettings): Promise<IUIKitModalViewParam> {
-
+export async function createSchedulerModal(
+    cxtViewID: string,
+    modify: IModify,
+    schedulerType: SchedulerType,
+    autoReplySettings: IAutoReplySettings,
+    language: AppLanguage = 'en',
+): Promise<IUIKitModalViewParam> {
     const block = modify.getCreator().getBlockBuilder();
+    const hourOptions = hoursOfDay.map((hour) => ({
+        text: block.newPlainTextObject(hour.text),
+        value: hour.value,
+    }));
 
-    switch (schedulerType) {
-        case SchedulerType.Daily:
-            block.addSectionBlock({
-                // blockId: 'autoReplySettings',
-                text: block.newMarkdownTextObject('A daily scheduler will enable auto-reply every day at the selected time and disable it at the chosen disable time'),
-            });
-            block.addActionsBlock({
-                blockId: `autoReplySchedulerDaily`,
-                elements: [
-                    block.newStaticSelectElement({
-                        placeholder: block.newPlainTextObject('Enable it at'),
-                        actionId: 'EnableTime',
-                        options: hoursOfDay.map((hour) => ({
-                            text: block.newPlainTextObject(hour.text),
-                            value: hour.value,
-                        })),
-                        initialValue: undefined,
-                        
-                    }),
-                    block.newStaticSelectElement({
-                        placeholder: block.newPlainTextObject('Disable it at'),
-                        actionId: 'DisableTime',
-                        options: hoursOfDay.map((hour) => ({
-                            text: block.newPlainTextObject(hour.text),
-                            value: hour.value,
-                        })),
-                        initialValue: undefined
-                    }),
-                    block.newPlainTextInputElement({
-                        actionId: 'Message',
-                        initialValue: autoReplySettings.message,
-                        multiline: true,
-                    }),
-                ],
-            });
-            break;
-
-            case SchedulerType.Weekly:
-                block.addSectionBlock({
-                    // blockId: 'autoReplySettings',
-                    text: block.newMarkdownTextObject('A Weekly scheduler will enable auto-reply every chosen day(s) at the selected time and disable it at the chosen disable time'),
-                });
-                block.addActionsBlock({
-                    blockId: `autoReplyScheduler`,
-                    elements: [
-                        block.newMultiStaticElement({
-                            placeholder: block.newPlainTextObject('Select weekdays'),
-                            actionId: 'SchedulerDays',
-                            options: daysOfWeek.map((day) => ({
-                                text: block.newPlainTextObject(day.text),
-                                value: day.value,
-    
-                            })),
-                            initialValue: []
-                        }),
-                    ],
-                });
-                block.addActionsBlock({
-                    blockId: `autoReplyScheduler`,
-                    elements: [
-                        block.newStaticSelectElement({
-                            placeholder: block.newPlainTextObject('Enable it at'),
-                            actionId: 'StartSchedulerHour',
-                            options: hoursOfDay.map((hour) => ({
-                                text: block.newPlainTextObject(hour.text),
-                                value: hour.value,
-                            })),
-                            initialValue: undefined
-                        }),
-                        block.newStaticSelectElement({
-                            placeholder: block.newPlainTextObject('Disable it at'),
-                            actionId: 'EndSchedulerHour',
-                            options: hoursOfDay.map((hour) => ({
-                                text: block.newPlainTextObject(hour.text),
-                                value: hour.value,
-                            })),
-                            initialValue: undefined
-                        }),
-                    ],
-                });
-                break;
-
-        default:
-            break;
+    if (schedulerType === SchedulerType.Weekly) {
+        block.addSectionBlock({
+            text: block.newMarkdownTextObject(translate('modal_weekly_description', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplyScheduler',
+            optional: false,
+            element: block.newMultiStaticElement({
+                placeholder: block.newPlainTextObject(translate('modal_select_weekdays', language)),
+                actionId: 'SchedulerDays',
+                options: daysOfWeek.map((day) => ({
+                    text: block.newPlainTextObject(day.text),
+                    value: day.value,
+                })),
+            }),
+            label: block.newPlainTextObject(translate('modal_select_weekdays', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplyScheduler',
+            optional: false,
+            element: block.newStaticSelectElement({
+                placeholder: block.newPlainTextObject(translate('modal_enable_at', language)),
+                actionId: 'StartSchedulerHour',
+                options: hourOptions,
+            }),
+            label: block.newPlainTextObject(translate('modal_enable_at', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplyScheduler',
+            optional: false,
+            element: block.newStaticSelectElement({
+                placeholder: block.newPlainTextObject(translate('modal_disable_at', language)),
+                actionId: 'EndSchedulerHour',
+                options: hourOptions,
+            }),
+            label: block.newPlainTextObject(translate('modal_disable_at', language)),
+        });
+    } else {
+        // Daily
+        block.addSectionBlock({
+            text: block.newMarkdownTextObject(translate('modal_daily_description', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplySchedulerDaily',
+            optional: false,
+            element: block.newStaticSelectElement({
+                placeholder: block.newPlainTextObject(translate('modal_enable_at', language)),
+                actionId: 'EnableTime',
+                options: hourOptions,
+            }),
+            label: block.newPlainTextObject(translate('modal_enable_at', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplySchedulerDaily',
+            optional: false,
+            element: block.newStaticSelectElement({
+                placeholder: block.newPlainTextObject(translate('modal_disable_at', language)),
+                actionId: 'DisableTime',
+                options: hourOptions,
+            }),
+            label: block.newPlainTextObject(translate('modal_disable_at', language)),
+        });
+        block.addInputBlock({
+            blockId: 'autoReplySchedulerDaily',
+            optional: true,
+            element: block.newPlainTextInputElement({
+                actionId: 'Message',
+                initialValue: autoReplySettings.message,
+                multiline: true,
+            }),
+            label: block.newPlainTextObject(translate('modal_message_label', language)),
+        });
     }
 
     return {
-        id: uuid(),
-        title: block.newPlainTextObject('Add a scheduler', false),
+        id: newId(),
+        title: block.newPlainTextObject(translate('modal_title', language), false),
         submit: block.newButtonElement({
             text: block.newPlainTextObject('Submit'),
             style: ButtonStyle.PRIMARY,
-            value: cxtViewID
-
+            value: cxtViewID,
         }),
         close: block.newButtonElement({
             text: block.newPlainTextObject('Cancel'),
         }),
-
         blocks: block.getBlocks(),
-    }
-
+    };
 }
