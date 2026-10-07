@@ -1,7 +1,7 @@
 {
     "url": "http://localhost:3000",
-    "username": "",
-    "password": "",
+    "username": "devadmin",
+    "password": "Devpassword123!",
     "ignoredFiles": [
         "**/README.md",
         "**/package-lock.json",
