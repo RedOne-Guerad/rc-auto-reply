@@ -7,7 +7,7 @@ import {
     IModify,
 } from '@rocket.chat/apps-engine/definition/accessors';
 import { App } from '@rocket.chat/apps-engine/definition/App';
-import { IMessage, IMessageAttachment, IPostMessageSent, MessageActionButtonsAlignment, MessageActionType } from '@rocket.chat/apps-engine/definition/messages';
+import { IMessage, IPostMessageSent } from '@rocket.chat/apps-engine/definition/messages';
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
 import { RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
@@ -16,7 +16,7 @@ import { StartupType } from '@rocket.chat/apps-engine/definition/scheduler';
 import { IAutoReplySettings, IScheduler, ReplyFrequency, SchedulerType } from './src/utils/IAutoReplySettings';
 import { AutoReplyCommand } from './src/AutoReplyCommand';
 import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/definition/ui';
-import { IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
+import { ButtonStyle, IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
 import {
     getAutoReplySettings,
     sendMessage,
@@ -111,30 +111,29 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             const tracking = await getChatTracking(me.id, message.room.id, read);
             if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
                 const lang = await getLanguage(read);
-                const attachment = {
-                    actionButtonsAlignment: MessageActionButtonsAlignment.HORIZONTAL,
-                    actions: [
-                        {
-                            text: translate('notify_btn_yes', lang),
-                            type: MessageActionType.BUTTON,
-                            msg_in_chat_window: true,
-                            msg: '/auto-reply disable',
-                        },
-                        {
-                            text: translate('notify_btn_disable_for_user', lang),
-                            type: MessageActionType.BUTTON,
-                            msg_in_chat_window: true,
-                            msg: `/auto-reply remove-user ${otherUser.id}`,
-                        },
-                        {
-                            text: translate('notify_btn_no', lang),
-                            type: MessageActionType.BUTTON,
-                            msg_in_chat_window: true,
-                            msg: '/auto-reply status',
-                        },
+                const block = modify.getCreator().getBlockBuilder();
+                // UIKit buttons (not legacy msg_in_chat_window actions, which
+                // Rocket.Chat >= 6.10 no longer executes — issue #13)
+                block.addActionsBlock({
+                    elements: [
+                        block.newButtonElement({
+                            text: block.newPlainTextObject(translate('notify_btn_yes', lang)),
+                            value: 'disable',
+                            style: ButtonStyle.DANGER,
+                            actionId: 'NotifyDisable',
+                        }),
+                        block.newButtonElement({
+                            text: block.newPlainTextObject(translate('notify_btn_disable_for_user', lang)),
+                            value: otherUser.id,
+                            actionId: 'NotifyDisableForUser',
+                        }),
+                        block.newButtonElement({
+                            text: block.newPlainTextObject(translate('notify_btn_no', lang)),
+                            actionId: 'NotifyDismiss',
+                        }),
                     ],
-                } as IMessageAttachment;
-                await sendNotifyMessage(this, modify, message.room, me, translate('notify_enabled_prompt', lang), [attachment]);
+                });
+                await sendNotifyMessage(this, modify, message.room, me, translate('notify_enabled_prompt', lang), undefined, block);
                 tracking.lastNotifyAt = Date.now();
                 await updateChatTracking(me.id, message.room.id, tracking, persistence);
             }
@@ -182,24 +181,22 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
             if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
-                const attachment = {
-                    actionButtonsAlignment: MessageActionButtonsAlignment.HORIZONTAL,
-                    actions: [
-                        {
-                            text: translate('notify_btn_yes', lang),
-                            type: MessageActionType.BUTTON,
-                            msg_in_chat_window: true,
-                            msg: '/auto-reply disable',
-                        },
-                        {
-                            text: translate('notify_btn_no', lang),
-                            type: MessageActionType.BUTTON,
-                            msg_in_chat_window: true,
-                            msg: '/auto-reply status',
-                        },
+                const block = modify.getCreator().getBlockBuilder();
+                block.addActionsBlock({
+                    elements: [
+                        block.newButtonElement({
+                            text: block.newPlainTextObject(translate('notify_btn_yes', lang)),
+                            value: 'disable',
+                            style: ButtonStyle.DANGER,
+                            actionId: 'NotifyDisable',
+                        }),
+                        block.newButtonElement({
+                            text: block.newPlainTextObject(translate('notify_btn_no', lang)),
+                            actionId: 'NotifyDismiss',
+                        }),
                     ],
-                } as IMessageAttachment;
-                await sendNotifyMessage(this, modify, message.room, mentionedUser, translate('notify_enabled_prompt', lang), [attachment]);
+                });
+                await sendNotifyMessage(this, modify, message.room, mentionedUser, translate('notify_enabled_prompt', lang), undefined, block);
                 tracking.lastNotifyAt = Date.now();
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
@@ -413,13 +410,33 @@ export class AutoReplyApp extends App implements IPostMessageSent {
     }
 
     /**
-     * Handles block actions: enable/disable toggles, scheduler add and remove.
+     * Handles block actions: enable/disable toggles, scheduler add and remove,
+     * and the notification quick actions (issue #13).
      */
     public async executeBlockActionHandler(context: UIKitBlockInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<any> {
         const data = context.getInteractionData();
         const settings = await getAutoReplySettings(data.user.id, read);
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, data.user.id);
         const barContext = await this.buildBarContext(data.user, data.room, read);
+
+        if (data.actionId === 'NotifyDisable') {
+            settings.on = false;
+            await persistence.updateByAssociation(assoc, settings, true);
+            return context.getInteractionResponder().successResponse();
+        }
+        if (data.actionId === 'NotifyDisableForUser') {
+            if (data.value) {
+                const user = await read.getUserReader().getById(data.value);
+                if (user && !isUserExcluded(settings, user.id)) {
+                    settings.users = [...(settings.users ?? []), user];
+                    await persistence.updateByAssociation(assoc, settings, true);
+                }
+            }
+            return context.getInteractionResponder().successResponse();
+        }
+        if (data.actionId === 'NotifyDismiss') {
+            return context.getInteractionResponder().successResponse();
+        }
 
         if (data.actionId === 'EnableApp') {
             settings.on = true;
