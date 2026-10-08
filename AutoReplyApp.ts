@@ -75,7 +75,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             const room = message.room;
             // E2EE safety net: even if the room flag is not propagated to the
             // apps-engine room object, encrypted messages carry type 'e2e'
-            if (!room || isRoomEncrypted(room) || message.type === 'e2e') {
+            // typed via cast: older engine typings lack IMessage.type
+            if (!room || isRoomEncrypted(room) || (message as { type?: string }).type === 'e2e') {
                 return;
             }
 
@@ -494,7 +495,10 @@ function multiValue(state: any): string[] | undefined {
 
 function parseMentionedUsernames(text: string): string[] {
     const mentioned = new Set<string>();
-    for (const match of text.matchAll(/(?:^|\s)@([a-z0-9._-]+)/gi)) {
+    const pattern = /(?:^|\s)@([a-z0-9._-]+)/gi;
+    let match: RegExpExecArray | null;
+    // exec loop instead of matchAll: ES2017-safe for older build toolchains
+    while ((match = pattern.exec(text)) !== null) {
         const username = match[1].toLowerCase();
         if (username !== 'all' && username !== 'here') {
             mentioned.add(username);
