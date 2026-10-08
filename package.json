@@ -5,7 +5,7 @@
     "scripts": {
         "compile": "tsc -p tsconfig.json --noEmit",
         "deploy": "rc-apps deploy --url http://localhost:3000 --username devadmin --password 'Devpassword123!'",
-        "package": "rc-apps package"
+        "package": "mkdir -p /tmp/rcar-pkg && mv dev marketplace-screenshots docker-compose.yml /tmp/rcar-pkg/ && npx rc-apps package --no-compile; mv /tmp/rcar-pkg/dev /tmp/rcar-pkg/marketplace-screenshots /tmp/rcar-pkg/docker-compose.yml . 2>/dev/null; rmdir /tmp/rcar-pkg 2>/dev/null; true"
     },
     "devDependencies": {
         "@rocket.chat/apps-cli": "^1.14.0",
