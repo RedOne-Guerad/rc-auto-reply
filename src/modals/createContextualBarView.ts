@@ -4,7 +4,7 @@ import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/
 import { stringDateTime, uuid } from "../utils/helpers";
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
-import { ActionsBlock, Button, DividerBlock, InputBlock, MultiStaticSelectElement, InputOption, PlainText, SectionBlock,  TextInput, UsersSelectInput } from "../utils/blockBuilder";
+import { ActionsBlock, Button, DividerBlock, InputBlock, MultiStaticSelectElement, InputOption, PlainText, SectionBlock, TextInput } from "../utils/blockBuilder";
 
 export async function createContextualBarView(
     viewId: any,

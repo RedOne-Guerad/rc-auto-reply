@@ -3,8 +3,8 @@ import { IMessage, IMessageAttachment, MessageActionButtonsAlignment, MessageAct
 import { AutoReplyApp } from "../../AutoReplyApp";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
 import { getAutoReplySettings, sendMessage, sendNotifyMessage } from "../utils/helpers";
+import { readLastReplies, saveLastReply } from "../utils/lastReplies";
 import { IAutoReplySettings, IReplyFrequency } from "../utils/IAutoReplySettings";
-import { RocketChatAssociationModel, RocketChatAssociationRecord } from "@rocket.chat/apps-engine/definition/metadata";
 
 export class PostMessageSentHandler{
     constructor(
@@ -104,18 +104,19 @@ export class PostMessageSentHandler{
         if (OtherAutoReplySettings.users?.some(user => user.id === me.id)) return;
     
         const OtherreplyFrequency = OtherAutoReplySettings.replyFrequency;
-        if (OtherreplyFrequency !== String(IReplyFrequency.OnEveryMessage) && OtherAutoReplySettings.usersLastReply) {
-            const OtherLastReply = this.getOtherUserLastReply(OtherAutoReplySettings, me.id);
+        if (OtherreplyFrequency !== String(IReplyFrequency.OnEveryMessage)) {
+            const OtherLastReply = await this.getOtherUserLastReply(otherUser.id, me.id);
             if (this.shouldSkipAutoReply(OtherreplyFrequency, OtherLastReply)) return;
         }
     
         const threadId = this.message.threadId
         await sendMessage(this.app, this.modify, this.message.room, otherUser, OtherAutoReplySettings.message, threadId);
-        await this.updateOtherUserLastReply(otherUser.id, me);
+        await saveLastReply(otherUser.id, me.id, this.read, this.persistence);
     }
     
-    private getOtherUserLastReply(OtherAutoReplySettings: IAutoReplySettings, meId: string): Date | null {
-        return OtherAutoReplySettings.usersLastReply?.find(userLastReply => userLastReply.user.id === meId)?.lastMessage || null;
+    private async getOtherUserLastReply(otherUserId: string, meId: string): Promise<Date | null> {
+        const replies = await readLastReplies(otherUserId, this.read);
+        return replies.find(userLastReply => userLastReply.userId === meId)?.lastMessage || null;
     }
     
     private shouldSkipAutoReply(OtherreplyFrequency: string, OtherLastReply: Date | null): boolean {
@@ -141,24 +142,5 @@ export class PostMessageSentHandler{
         }
     }
     
-    private async updateOtherUserLastReply(otherUserId: string, me: IUser): Promise<void> {
-        const previousSettings = await getAutoReplySettings(otherUserId, this.read);
-        const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, otherUserId);
-        const usersLastReply = previousSettings?.usersLastReply || [];
-        const userLastReplyIndex = usersLastReply.findIndex(reply => reply.user.id === me.id);
-    
-        if (userLastReplyIndex !== -1) {
-            usersLastReply[userLastReplyIndex].lastMessage = new Date();
-        } else {
-            usersLastReply.push({ user: me, lastMessage: new Date() });
-        }
-    
-        const state: IAutoReplySettings = {
-            ...previousSettings,
-            usersLastReply,
-        };
-    
-        await this.persistence.updateByAssociation(assocMe, state, true);
-    }
     
 }

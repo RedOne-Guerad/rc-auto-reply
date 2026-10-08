@@ -1,6 +1,6 @@
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { ActionsBlock, BlockElement, ButtonElement, ChannelsSelectElement, CheckboxElement, ContextBlock, ConversationsSelectElement, DatePickerElement, DividerBlock, InputBlock, LinearScaleElement, Markdown, MultiChannelsSelectElement, MultiConversationsSelectElement, MultiStaticSelectElement, MultiUsersSelectElement, Option, PlainText, PlainTextInputElement, RadioButtonElement, SectionBlock, StaticSelectElement, TimePickerElement, ToggleSwitchElement, UsersSelectElement } from "@rocket.chat/ui-kit";
-import { uuid } from "./helpers";
+import { APP_ID } from "./helpers";
 
 export type inputElement = ChannelsSelectElement | ConversationsSelectElement | DatePickerElement | LinearScaleElement | MultiChannelsSelectElement | MultiConversationsSelectElement | MultiStaticSelectElement | MultiUsersSelectElement | PlainTextInputElement | StaticSelectElement | UsersSelectElement | CheckboxElement | RadioButtonElement | TimePickerElement | ToggleSwitchElement;
 
@@ -21,7 +21,7 @@ export function TextInput(placeholderText: string, blockId: string, actionId: st
                 type: "plain_text",
                 text: placeholderText,
             },
-            appId: uuid(),
+            appId: APP_ID,
             blockId: blockId,
             actionId: actionId,
             initialValue: initialValue,
@@ -36,7 +36,7 @@ export function DateInput(placeholderText: string, blockId: string, actionId: st
                 type: "plain_text",
                 text: placeholderText,
             },
-            appId: uuid(),
+            appId: APP_ID,
             blockId: blockId,
             actionId: actionId,
             initialDate: initialDate,
@@ -49,7 +49,7 @@ export function TimeInput(placeholderText: string, blockId: string, actionId: st
                 type: "plain_text",
                 text: placeholderText,
             },
-            appId: uuid(),
+            appId: APP_ID,
             blockId: blockId,
             actionId: actionId,
             initialTime: initialTime,
@@ -63,7 +63,7 @@ export function Button(labelText: string, blockId: string, actionId: string, val
             type: "plain_text",
             text: labelText,
         },
-        appId: uuid(),
+        appId: APP_ID,
         blockId: blockId,
         actionId: actionId,
         url: url,
@@ -109,7 +109,7 @@ export function StaticSelectElement(placeholderText: string, options: Array<Opti
             text: placeholderText,
         },
         options: options,
-        appId: uuid(),
+        appId: APP_ID,
         blockId: blockId,
         actionId: actionId,
         initialValue: initialValue,
@@ -123,7 +123,7 @@ export function MultiStaticSelectElement(placeholderText: string, options: Array
             text: placeholderText,
         },
         options: options,
-        appId: uuid(),
+        appId: APP_ID,
         blockId: blockId,
         actionId: actionId,
         initialValue: initialValue,
@@ -163,7 +163,7 @@ export function ToggleSwitchButton(options: Option[], initialOption: Option[], b
     return {
         type: "toggle_switch",
         options: options,
-        appId: uuid(),
+        appId: APP_ID,
         blockId: blockId,
         actionId: actionId,
         initialOptions: initialOption,

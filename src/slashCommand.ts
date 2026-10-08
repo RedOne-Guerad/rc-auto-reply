@@ -4,6 +4,7 @@ import { ISlashCommand, SlashCommandContext } from '@rocket.chat/apps-engine/def
 
 import { IAutoReplySettings } from './utils/IAutoReplySettings';
 import { getAutoReplySettings, sendNotifyMessage } from './utils/helpers';
+import { resetLastRepliesOnSwitch } from './utils/lastReplies';
 
 export class SlashCommand implements ISlashCommand {
     public command = 'auto-reply';
@@ -80,6 +81,7 @@ export class SlashCommand implements ISlashCommand {
             ...previousSettings,
             on: true,
         };
+        await resetLastRepliesOnSwitch(context.getSender().id, previousSettings, true, persis);
         await persis.updateByAssociation(assoc, autoReplySettings, true);
 
         await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is disabled for: @' + user.username);
@@ -94,9 +96,10 @@ export class SlashCommand implements ISlashCommand {
         const autoReplySettings: IAutoReplySettings = {
             ...previousSettings,
             on: true,
-            message: args.join(' '),
+            message: args.join(' ') || previousSettings.message,
         };
 
+        await resetLastRepliesOnSwitch(context.getSender().id, previousSettings, true, persis);
         await persis.updateByAssociation(assoc, autoReplySettings, true);
 
         await sendNotifyMessage(undefined, modify, context.getRoom(), context.getSender(), '`auto reply` is enabled, with the following message:\n>' + autoReplySettings.message);

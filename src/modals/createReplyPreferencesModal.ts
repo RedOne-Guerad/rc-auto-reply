@@ -17,6 +17,7 @@ export async function createReplyPreferencesModal(cxtViewID: string, modify: IMo
         'Reply Frequency',
         [
             InputOption('Send auto-reply On Every Message', String(IReplyFrequency.OnEveryMessage)),
+            InputOption('Send auto-reply Once', String(IReplyFrequency.Once)),
             InputOption('Send auto-reply Once Per Hour', String(IReplyFrequency.OncePerHour)),
             InputOption('Send auto-reply Once Per Day', String(IReplyFrequency.OncePerDay)),
             InputOption('Send auto-reply Once Per Week', String(IReplyFrequency.OncePerWeek)),

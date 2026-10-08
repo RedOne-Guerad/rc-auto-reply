@@ -1,6 +1,7 @@
 import { IHttp, IModify, IPersistence, IRead } from "@rocket.chat/apps-engine/definition/accessors";
 import { IUIKitResponse, UIKitViewSubmitInteractionContext } from "@rocket.chat/apps-engine/definition/uikit";
 import { getAutoReplySettings, sendNotifyMessage, uuid } from "../utils/helpers";
+import { resetLastRepliesOnSwitch } from "../utils/lastReplies";
 import { IAutoReplySettings, IReplyFrequency } from "../utils/IAutoReplySettings";
 import { createContextualBarView } from "../modals/createContextualBarView";
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from "@rocket.chat/apps-engine/definition/metadata";
@@ -35,15 +36,16 @@ export class ViewSubmitHandler {
         const previousSettings = await getAutoReplySettings(interactionData.user.id, this.read);
         const excludedUsers = await this.getExcludedUsers(autoReplySettings, previousSettings);
 
+        const on = action ?? previousSettings?.on ?? false;
         const state: IAutoReplySettings = {
-            on: action ?? previousSettings?.on ?? false,
+            on,
             message: autoReplySettings.AutoReplyMessage || previousSettings?.message,
             users: excludedUsers ?? [],
             schedulers: previousSettings?.schedulers,
-            usersLastReply: previousSettings?.usersLastReply,
             replyFrequency: previousSettings.replyFrequency || String(IReplyFrequency.OnEveryMessage),
         };
 
+        await resetLastRepliesOnSwitch(interactionData.user.id, previousSettings, on, this.persistence);
         await this.persistence.updateByAssociation(assocMe, state, true);
 
         if (interactionData.room) {
@@ -125,7 +127,6 @@ export class ViewSubmitHandler {
         if (this.context.getInteractionResponder().updateContextualBarViewResponse(modal).success) {
             await this.persistence.updateByAssociation(assocMe, previousSettings, true);
         }
-        console.log(previousSettings);
 
         return { success: true };
     }

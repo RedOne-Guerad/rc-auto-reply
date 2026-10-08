@@ -15,16 +15,15 @@ import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/
 import { IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
 import { getAutoReplySettings } from './src/utils/helpers';
 import { createContextualBarView } from './src/modals/createContextualBarView';
-import {BlockActionHandler} from './src/handler/blockActionHandler'
-import { ViewSubmitHandler } from './src/handler/viewSubmitHandler';
-import { PostMessageSentHandler } from './src/handler/postMessageSentHandler';
+import {BlockActionHandler} from './src/handlers/blockActionHandler'
+import { ViewSubmitHandler } from './src/handlers/viewSubmitHandler';
+import { PostMessageSentHandler } from './src/handlers/postMessageSentHandler';
 export class AutoReplyApp extends App implements IPostMessageSent {
 
     public async checkPostMessageSent(message: IMessage, read: IRead, http: IHttp): Promise<boolean> {
         // ToDo:
         // auto-respond to rooms beside direct messages
         // when user is tagged by someone
-        this.getLogger().log(message.room.type, RoomType.DIRECT_MESSAGE);
         return message.room.type === RoomType.DIRECT_MESSAGE;
     }
 
