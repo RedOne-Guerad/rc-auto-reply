@@ -113,7 +113,10 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 const lang = await getLanguage(read);
                 const block = modify.getCreator().getBlockBuilder();
                 // UIKit buttons (not legacy msg_in_chat_window actions, which
-                // Rocket.Chat >= 6.10 no longer executes — issue #13)
+                // Rocket.Chat >= 6.10 no longer executes — issue #13).
+                // Notifications render blocks only, so the prompt must be a
+                // section block rather than the message text.
+                block.addSectionBlock({ text: block.newMarkdownTextObject(translate('notify_enabled_prompt', lang)) });
                 block.addActionsBlock({
                     elements: [
                         block.newButtonElement({
@@ -182,6 +185,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             }
             if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
                 const block = modify.getCreator().getBlockBuilder();
+                block.addSectionBlock({ text: block.newMarkdownTextObject(translate('notify_enabled_prompt', lang)) });
                 block.addActionsBlock({
                     elements: [
                         block.newButtonElement({
