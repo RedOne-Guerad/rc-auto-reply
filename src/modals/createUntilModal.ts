@@ -1,5 +1,5 @@
 import { IModify } from "@rocket.chat/apps-engine/definition/accessors";
-import { hoursOfDay, endOfDayHour, newId } from "../utils/helpers";
+import { hoursOfDay, endOfDayHour, newId, timezoneOffsetOptions } from "../utils/helpers";
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
 import { IAutoReplySettings } from "../utils/IAutoReplySettings";
@@ -15,6 +15,8 @@ export async function createUntilModal(
     modify: IModify,
     settings: IAutoReplySettings,
     language: AppLanguage = 'en',
+    /** initial timezone (minutes) — the caller resolves profile vs fallback */
+    tzMinutes: number = 0,
 ): Promise<IUIKitModalViewParam> {
     const block = modify.getCreator().getBlockBuilder();
     const hourOptions = hoursOfDay.map((h) => ({
@@ -26,6 +28,19 @@ export async function createUntilModal(
         value: endOfDayHour.value,
     }];
 
+    block.addInputBlock({
+        blockId: UNTIL_FORM_BLOCK,
+        optional: false,
+        element: block.newStaticSelectElement({
+            actionId: 'Timezone',
+            options: timezoneOffsetOptions().map((opt) => ({
+                text: block.newPlainTextObject(opt.text),
+                value: opt.value,
+            })),
+            initialValue: String(tzMinutes),
+        }),
+        label: block.newPlainTextObject(translate('modal_tz_label', language)),
+    });
     block.addInputBlock({
         blockId: UNTIL_FORM_BLOCK,
         optional: false,

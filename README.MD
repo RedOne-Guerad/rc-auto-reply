@@ -11,7 +11,7 @@ A [Rocket.Chat](https://rocket.chat) app that automatically answers incoming **d
   - `cooldown` — reply at most once every N hours (presets from 1 h to 1 week).
 - **Exclusion list** — never auto-reply to selected users.
 - **Mention replies** (opt-in) — also auto-reply when you are @mentioned in channels/private groups.
-- **Timed auto-reply** ("on until…", new in 2.2.0) — on for a window you choose (`until friday 17:00`), with an optional message just for that period. Nothing is switched behind your back: the window is evaluated when a message arrives, and the panel always shows the current status ("ON until Tue 13 Oct, 00:00 — 3d 0h left").
+- **Timed auto-reply** (new in 2.2.0) — schedule a window (`until friday 17:00`) with an optional message just for that period; the timezone is picked in the schedule form (defaults to your profile timezone). Nothing is switched behind your back: the window is evaluated when a message arrives, and the panel always shows the current status ("ON until Tue 13 Oct, 00:00 — 3d 0h left").
 - **Settings from the user menu** (new in 2.2.0) — a modal under your avatar → Apps, reachable from anywhere including encrypted rooms; after saving it confirms "✅ Saved" with the current status.
 - **Timezone from your profile** (new in 2.2.0) — windows use your Rocket.Chat profile timezone (DST included); a manual fallback exists for profiles without one.
 - **E2EE-safe** — in end-to-end encrypted rooms the app stays silent (see [limitations](#limitations)).
@@ -52,7 +52,7 @@ If you text a user while your auto-reply is enabled, you will get options to dis
 /auto-reply include-user <id|username>   resume auto-replying to a user
 /auto-reply frequency every|once|cooldown [hours]
 /auto-reply mentions on|off              reply when mentioned in channels
-/auto-reply timezone +2                  fallback timezone (e.g. -5, +5.5)
+/auto-reply timezone +2                  fallback timezone for schedules (e.g. -5)
 ```
 
 ## Limitations

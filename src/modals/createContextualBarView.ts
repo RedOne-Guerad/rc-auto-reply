@@ -2,7 +2,7 @@ import { IModify, IRead } from "@rocket.chat/apps-engine/definition/accessors";
 import { IAutoReplySettings, COOLDOWN_PRESETS_HOURS } from "../utils/IAutoReplySettings";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
 import {
-    newId, timezoneOffsetOptions, formatOffsetMinutes, formatInTz, formatDurationUntil,
+    newId, formatOffsetMinutes, formatInTz, formatDurationUntil,
     isAutoReplyActive, resolveTzMinutes,
 } from "../utils/helpers";
 import { ButtonStyle, BlockBuilder } from "@rocket.chat/apps-engine/definition/uikit";
@@ -51,7 +51,7 @@ export function buildSettingsBlocks(
     context: IBarContext,
     banner?: string,
 ): BlockBuilder {
-    const { message, users, frequency, cooldownHours, replyToMentions, timezoneOffsetMinutes } = autoReplySettings;
+    const { message, users, frequency, cooldownHours, replyToMentions } = autoReplySettings;
     const lang = context.language;
     const block = modify.getCreator().getBlockBuilder();
     const now = Date.now();
@@ -166,21 +166,6 @@ export function buildSettingsBlocks(
             initialValue: replyToMentions ? 'on' : 'off',
         }),
         label: block.newPlainTextObject(translate('bar_mentions_label', lang)),
-    });
-
-    // Fallback timezone (profile utcOffset wins at runtime)
-    block.addInputBlock({
-        blockId: SETTINGS_BLOCK,
-        optional: true,
-        element: block.newStaticSelectElement({
-            actionId: 'TimezoneOffset',
-            options: timezoneOffsetOptions().map((opt) => ({
-                text: block.newPlainTextObject(opt.text),
-                value: opt.value,
-            })),
-            initialValue: String(timezoneOffsetMinutes ?? 0),
-        }),
-        label: block.newPlainTextObject(translate('bar_timezone_label', lang)),
     });
 
     // Excluded users: only meaningful with a DM peer to offer; existing

@@ -355,7 +355,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         const form = ((interactionData.view.state ?? {}) as Record<string, any>)[UNTIL_FORM_BLOCK] ?? {};
         const user = interactionData.user;
         const previous = await getAutoReplySettings(user.id, read);
-        const tz = resolveTzMinutes(user, previous);
+        const formTz = Number(selectValue(form.Timezone));
+        const tz = Number.isFinite(formTz) && formTz >= -720 && formTz <= 840 ? formTz : resolveTzMinutes(user, previous);
         const now = Date.now();
         const local = new Date(now + tz * 60000);
         const lang = await getLanguage(read);
@@ -395,6 +396,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             ...previous,
             mode: 'until',
             until: { start, end: until, message: windowMessage },
+            // remember the chosen timezone as the fallback for next time
+            timezoneOffsetMinutes: tz,
             enabledAt: start <= now ? now : previous.enabledAt,
         };
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, user.id);
@@ -402,6 +405,18 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
         // successResponse closes the modal — no duplicate submissions
         return context.getInteractionResponder().successResponse();
+    }
+
+    /** Small visible confirmation after a notification quick action. */
+    private async notifyConfirmation(read: IRead, modify: IModify, data: { user: IUser; room?: { id: string } }, text: string): Promise<void> {
+        try {
+            const room = data.room ? await read.getRoomReader().getById(data.room.id) : undefined;
+            if (room) {
+                await sendNotifyMessage(this, modify, room, data.user, text);
+            }
+        } catch (error) {
+            this.getLogger().error({ msg: 'confirmation notify failed', error: String(error) });
+        }
     }
 
     /**
@@ -418,6 +433,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             settings.mode = 'off';
             settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
+            await this.notifyConfirmation(read, modify, data, translate('notify_disabled_done', await getLanguage(read)));
             return context.getInteractionResponder().successResponse();
         }
         if (data.actionId === 'NotifyDisableForUser') {
@@ -426,6 +442,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 if (user && !isUserExcluded(settings, user.id)) {
                     settings.users = [...(settings.users ?? []), user];
                     await persistence.updateByAssociation(assoc, settings, true);
+                    await this.notifyConfirmation(read, modify, data, translate('notify_disabled_for_done', await getLanguage(read), { username: user.username || user.id }));
                 }
             }
             return context.getInteractionResponder().successResponse();
@@ -452,7 +469,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             );
         }
         if (data.actionId === 'OpenUntilForm') {
-            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language);
+            const tz = resolveTzMinutes(data.user, settings);
+            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz);
             return context.getInteractionResponder().openModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
