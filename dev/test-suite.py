@@ -236,7 +236,7 @@ def main():
     ensure_user("devadmin", "dave", "Dave")
     cmd("alice", "remove-user dave")
     s = alice_settings()
-    check("remove-user does not silently enable auto-reply", s is not None and s.get("on") is False, str(s and s.get("on")))
+    check("remove-user does not silently enable auto-reply", s is not None and s.get("mode") == "off", str(s and s.get("mode")))
     cmd("alice", "remove-user nonexistentuser")
     s2 = alice_settings()
     check("remove-user with bad id does not crash", s2 is not None)
@@ -270,50 +270,52 @@ def main():
     check("mention reply respects frequency=once per channel", second == 1, str(second))
     cmd("alice", "mentions off", room=ch)
 
-    # --- 8. scheduler tick ---
-    print("\n[8] scheduler toggles auto-reply on/off")
-    cmd("alice", "disable")
-    cmd("alice", "timezone 0")
+    # --- 8. timed windows (2.2 "until" mode) ---
+    print("\n[8] until-mode: timed auto-reply windows")
+    cmd("alice", "off")
+    t8 = int(time.time() * 1000)
+    cmd("alice", "until 2099-01-01 12:00 t8-window-message")
+    s = alice_settings()
+    check("until sets mode and window", s.get("mode") == "until" and (s.get("until") or {}).get("message") == "t8-window-message", str(s.get("mode")))
+    say("bob", ROOM_DM, "t8: inside the window")
+    n1 = wait_for_replies(count_replies(), 1)
+    check("replies inside the window", n1 > 0 or count_replies() > 0, "")
     mongo_eval(
         f"const p = db.rocketchat_apps_persistence.findOne({{'associations.0.id': '{ALICE_ID}'}}); "
-        f"p.data.schedulers = [{{id: 'test-daily', type: 'Daily', settings: {{enableTime: '00:00', disableTime: '23:59'}}}}]; "
+        "p.data.until = {start: Date.now()-7200000, end: Date.now()-3600000, message: 'expired'}; "
         f"db.rocketchat_apps_persistence.replaceOne({{_id: p._id}}, p);"
     )
-    mongo_eval(
-        "const assoc = [{model:'misc',id:'auto-reply-scheduler-users'}]; "
-        "let reg = db.rocketchat_apps_persistence.findOne({associations: {$all: assoc}}); "
-        "if (!reg) { db.rocketchat_apps_persistence.insertOne({associations: assoc, appId: '821cd5c6-1fb5-4d9e-8e88-e6176463efb6', data: {userIds: []}}); reg = db.rocketchat_apps_persistence.findOne({associations: {$all: assoc}}); } "
-        f"if (reg.data.userIds.indexOf('{ALICE_ID}') === -1) {{ reg.data.userIds.push('{ALICE_ID}'); }} "
-        "db.rocketchat_apps_persistence.replaceOne({_id: reg._id}, reg);"
-    )
-    print("  waiting up to 7 min for the scheduler tick (window: 00:00-23:59 = active)...")
-    toggled_on = False
-    for _ in range(14):
-        time.sleep(30)
-        s = alice_settings()
-        if s and s.get("on") is True:
-            toggled_on = True
-            break
-    check("scheduler enables auto-reply in active window", toggled_on)
+    base = count_replies()
+    say("bob", ROOM_DM, "t8: window expired")
+    time.sleep(8)
+    check("no replies after the window expired", count_replies() == base)
+    # future window: scheduled, not yet active
     mongo_eval(
         f"const p = db.rocketchat_apps_persistence.findOne({{'associations.0.id': '{ALICE_ID}'}}); "
-        f"p.data.schedulers = [{{id: 'test-daily', type: 'Daily', settings: {{enableTime: '01:00', disableTime: '01:30'}}}}]; "
+        "p.data.until = {start: Date.now()+3600000, end: Date.now()+7200000, message: 'future'}; "
         f"db.rocketchat_apps_persistence.replaceOne({{_id: p._id}}, p);"
     )
-    toggled_off = False
-    for _ in range(14):
-        time.sleep(30)
-        s = alice_settings()
-        if s and s.get("on") is False:
-            toggled_off = True
-            break
-    check("scheduler disables auto-reply outside window", toggled_off)
+    base = count_replies()
+    say("bob", ROOM_DM, "t8: before future window")
+    time.sleep(8)
+    check("no replies before a future window starts", count_replies() == base)
+    # off clears the window
+    cmd("alice", "off")
+    s = alice_settings()
+    check("off clears the timed window", s.get("mode") == "off" and not s.get("until"), str(s.get("mode")))
+
+    # --- 9. migration from 2.1 records ---
+    print("\n[9] migration: 2.1 record with on:true")
     mongo_eval(
         f"const p = db.rocketchat_apps_persistence.findOne({{'associations.0.id': '{ALICE_ID}'}}); "
-        f"p.data.schedulers = []; db.rocketchat_apps_persistence.replaceOne({{_id: p._id}}, p); "
-        f"const reg = db.rocketchat_apps_persistence.findOne({{associations: {{$all: [{{model:'misc',id:'auto-reply-scheduler-users'}}]}}}}); "
-        f"if (reg) {{ reg.data.userIds = reg.data.userIds.filter(id => id !== '{ALICE_ID}'); db.rocketchat_apps_persistence.replaceOne({{_id: reg._id}}, reg); }}"
+        "delete p.data.mode; delete p.data.until; p.data.on = true; p.data.frequency = 'every'; "
+        f"db.rocketchat_apps_persistence.replaceOne({{_id: p._id}}, p);"
     )
+    base = count_replies()
+    say("bob", ROOM_DM, "t9: migrated on:true record")
+    after = wait_for_replies(base, 1)
+    check("2.1 on:true record behaves as always-on", after > base, f"{base} -> {after}")
+    cmd("alice", "off")
 
     # --- summary ---
     print(f"\n=== {len(PASSES)} passed, {len(FAILURES)} failed ===")

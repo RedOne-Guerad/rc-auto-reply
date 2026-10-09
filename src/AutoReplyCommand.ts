@@ -3,13 +3,12 @@ import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket
 import { ISlashCommand, SlashCommandContext } from '@rocket.chat/apps-engine/definition/slashcommands';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
 
-import { IAutoReplySettings, ReplyFrequency } from './utils/IAutoReplySettings';
-import { getAutoReplySettings, sendNotifyMessage, getLanguage, isUserExcluded, formatOffsetMinutes } from './utils/helpers';
-import { syncSchedulerRegistry } from './scheduler';
+import { IAutoReplySettings, ReplyFrequency, COOLDOWN_PRESETS_HOURS } from './utils/IAutoReplySettings';
+import {
+    getAutoReplySettings, sendNotifyMessage, getLanguage, isUserExcluded, formatOffsetMinutes,
+    parseWhen, resolveTzMinutes, formatInTz, formatDurationUntil, isAutoReplyActive, messageFor,
+} from './utils/helpers';
 import { AppLanguage, translate } from './i18n/translations';
-
-type Reply = (text: string) => Promise<void>;
-type Persist = (settings: IAutoReplySettings) => Promise<IAutoReplySettings>;
 
 export class AutoReplyCommand implements ISlashCommand {
     public command = 'auto-reply';
@@ -33,20 +32,25 @@ export class AutoReplyCommand implements ISlashCommand {
 
         const persist = async (updated: IAutoReplySettings) => {
             await persis.updateByAssociation(assoc, updated, true);
-            await syncSchedulerRegistry(context.getSender().id, updated, persis, read);
             return updated;
         };
 
         switch (action) {
+            case 'on':
             case 'enable':
-                return this.handleEnable(settings, rest, lang, reply, persist);
+                return this.handleOn(settings, rest, lang, reply, persist);
+            case 'off':
             case 'disable': {
-                await persist({ ...settings, on: false });
-                return reply(translate('cmd_disabled', lang) + context.getSender().username + ' !');
+                await persist({ ...settings, mode: 'off', until: undefined, schedulers: [] });
+                return reply(translate('cmd_off', lang) + context.getSender().username + ' !');
             }
+            case 'until':
+                return this.handleUntil(settings, rest, context.getSender(), read, lang, reply, persist);
+            case 'from':
+                return this.handleFromUntil(settings, rest, context.getSender(), read, lang, reply, persist);
             case 'status':
             case 'list':
-                return reply(this.statusText(settings, lang));
+                return reply(this.statusText(settings, context.getSender(), lang));
             case 'remove-user':
                 return this.handleRemoveUser(settings, rest, read, lang, reply, persist);
             case 'include-user':
@@ -62,7 +66,7 @@ export class AutoReplyCommand implements ISlashCommand {
         }
     }
 
-    private async handleEnable(
+    private async handleOn(
         settings: IAutoReplySettings,
         rest: string[],
         lang: AppLanguage,
@@ -71,12 +75,93 @@ export class AutoReplyCommand implements ISlashCommand {
     ): Promise<void> {
         const updated: IAutoReplySettings = {
             ...settings,
-            on: true,
+            mode: 'always',
+            until: undefined,
             enabledAt: Date.now(),
             message: rest.length > 0 ? rest.join(' ') : settings.message,
         };
         await persist(updated);
-        return reply(translate('cmd_enabled', lang) + updated.message);
+        return reply(translate('cmd_on', lang) + updated.message);
+    }
+
+    /** /auto-reply until <when> [message] — on from now until <when>. */
+    private async handleUntil(
+        settings: IAutoReplySettings,
+        rest: string[],
+        sender: IUser,
+        read: IRead,
+        lang: AppLanguage,
+        reply: (t: string) => Promise<void>,
+        persist: (s: IAutoReplySettings) => Promise<IAutoReplySettings>,
+    ): Promise<void> {
+        if (rest.length === 0) {
+            return reply(translate('cmd_until_usage', lang));
+        }
+        const tz = resolveTzMinutes(sender, settings);
+        const twoToken = rest.length >= 2 ? parseWhen(rest.slice(0, 2).join(' '), tz) : null;
+        const end = twoToken ?? parseWhen(rest[0], tz);
+        const whenTokens = twoToken !== null ? 2 : 1;
+        if (end === null) {
+            return reply(translate('cmd_until_invalid', lang, { text: rest.slice(0, 2).join(' ') }));
+        }
+        const messageWords = rest.slice(whenTokens);
+        const updated: IAutoReplySettings = {
+            ...settings,
+            mode: 'until',
+            until: { start: Date.now(), end, message: messageWords.length ? messageWords.join(' ') : undefined },
+            enabledAt: Date.now(),
+        };
+        await persist(updated);
+        return reply(translate('cmd_until_set', lang, {
+            until: formatInTz(end, tz),
+            duration: formatDurationUntil(end),
+        }) + messageFor(updated));
+    }
+
+    /** /auto-reply from <when> until <when> [message] — a future window.
+     * Each <when> is one or two tokens (e.g. "friday", "friday 17:00",
+     * "2026-10-12 09:00"); the longest prefix that parses wins, the rest is
+     * the message. */
+    private async handleFromUntil(
+        settings: IAutoReplySettings,
+        rest: string[],
+        sender: IUser,
+        read: IRead,
+        lang: AppLanguage,
+        reply: (t: string) => Promise<void>,
+        persist: (s: IAutoReplySettings) => Promise<IAutoReplySettings>,
+    ): Promise<void> {
+        const untilIdx = rest.findIndex((a) => a.toLowerCase() === 'until');
+        if (untilIdx < 2 || untilIdx === rest.length - 1) {
+            return reply(translate('cmd_invalid_usage', lang));
+        }
+        const tz = resolveTzMinutes(sender, settings);
+        const left = rest.slice(0, untilIdx);
+        const right = rest.slice(untilIdx + 1);
+        const start = parseWhen(left.slice(0, 2).join(' '), tz) ?? parseWhen(left[0], tz);
+        const end = parseWhen(right.slice(0, 2).join(' '), tz) ?? parseWhen(right[0], tz);
+        if (start === null) {
+            return reply(translate('cmd_until_invalid', lang, { text: left.join(' ') }));
+        }
+        if (end === null) {
+            return reply(translate('cmd_until_invalid', lang, { text: right.slice(0, 2).join(' ') }));
+        }
+        if (end <= start) {
+            return reply(translate('cmd_until_after_end', lang));
+        }
+        const messageTokens = right.slice(parseWhen(right.slice(0, 2).join(' '), tz) !== null ? 2 : 1);
+        const message = messageTokens.join(' ');
+        const updated: IAutoReplySettings = {
+            ...settings,
+            mode: 'until',
+            until: { start, end, message: message || undefined },
+            enabledAt: start <= Date.now() ? Date.now() : undefined,
+        };
+        await persist(updated);
+        return reply(translate('cmd_from_until_set', lang, {
+            from: formatInTz(start, tz),
+            until: formatInTz(end, tz),
+        }) + messageFor(updated));
     }
 
     private async handleRemoveUser(
@@ -188,11 +273,29 @@ export class AutoReplyCommand implements ISlashCommand {
         return reply(translate('cmd_timezone_set', lang, { offset: formatOffsetMinutes(timezoneOffsetMinutes) }));
     }
 
-    private statusText(settings: IAutoReplySettings, lang: AppLanguage): string {
+    private statusText(settings: IAutoReplySettings, user: IUser, lang: AppLanguage): string {
+        const tz = resolveTzMinutes(user, settings);
         const lines: string[] = [];
-        lines.push(settings.on
-            ? translate('cmd_status_on', lang) + settings.message
-            : translate('cmd_status_off', lang));
+        const now = Date.now();
+        if (settings.mode === 'always') {
+            lines.push(translate('cmd_status_on', lang) + settings.message);
+        } else if (settings.mode === 'until' && settings.until) {
+            if (now < settings.until.start) {
+                lines.push(translate('cmd_status_until_future', lang, {
+                    from: formatInTz(settings.until.start, tz),
+                    until: formatInTz(settings.until.end, tz),
+                }) + messageFor(settings));
+            } else if (isAutoReplyActive(settings, now)) {
+                lines.push(translate('cmd_until_set', lang, {
+                    until: formatInTz(settings.until.end, tz),
+                    duration: formatDurationUntil(settings.until.end),
+                }) + messageFor(settings));
+            } else {
+                lines.push(translate('cmd_status_off', lang));
+            }
+        } else {
+            lines.push(translate('cmd_status_off', lang));
+        }
         switch (settings.frequency ?? 'every') {
             case 'once':
                 lines.push(translate('cmd_list_frequency_once', lang));
@@ -204,10 +307,12 @@ export class AutoReplyCommand implements ISlashCommand {
                 lines.push(translate('cmd_list_frequency_every', lang));
         }
         lines.push(translate('cmd_list_mentions', lang, { value: settings.replyToMentions ? 'on' : 'off' }));
-        lines.push(translate('cmd_list_timezone', lang, { offset: formatOffsetMinutes(settings.timezoneOffsetMinutes ?? 0) }));
+        const profileTz = Number((user as unknown as { utcOffset?: number | null }).utcOffset);
+        const tzKey = Number.isFinite(profileTz) && (user as unknown as { utcOffset?: number | null }).utcOffset !== null
+            ? 'cmd_list_timezone' : 'cmd_list_timezone_fallback';
+        lines.push(translate(tzKey, lang, { offset: formatOffsetMinutes(tz) }));
         const excluded = (settings.users ?? []).filter(Boolean).map((u) => '@' + (u.username || u.id)).join(', ');
         lines.push(excluded ? translate('cmd_list_excluded', lang, { users: excluded }) : translate('cmd_list_excluded_empty', lang));
-        lines.push(translate('cmd_list_schedulers', lang, { count: String((settings.schedulers ?? []).length) }));
         return lines.join('\n');
     }
 }
