@@ -17,6 +17,7 @@ import { AutoReplyCommand } from './src/AutoReplyCommand';
 import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/definition/ui';
 import { ButtonStyle, IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
 import {
+    windowBounds, epochToWall, wallToEpoch,
     getAutoReplySettings,
     sendMessage,
     sendNotifyMessage,
@@ -110,9 +111,10 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
         const now = Date.now();
         const mySettings = await getAutoReplySettings(me.id, read);
+        const myTz = resolveTzMinutes(me, mySettings);
 
         // If my auto-reply is active while I am typing, offer to disable it (throttled)
-        if (isAutoReplyActive(mySettings, now) && !isUserExcluded(mySettings, otherUser.id)) {
+        if (isAutoReplyActive(mySettings, myTz, now) && !isUserExcluded(mySettings, otherUser.id)) {
             const tracking = await getChatTracking(me.id, message.room.id, read);
             if (now - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
                 const lang = await getLanguage(read);
@@ -149,14 +151,15 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
         // auto-reply from the other user, if active for me
         const otherSettings = await getAutoReplySettings(otherUser.id, read);
-        if (!isAutoReplyActive(otherSettings, now) || isUserExcluded(otherSettings, me.id)) {
+        const otherTz = resolveTzMinutes(otherUser, otherSettings);
+        if (!isAutoReplyActive(otherSettings, otherTz, now) || isUserExcluded(otherSettings, me.id)) {
             return;
         }
         const tracking = await getChatTracking(otherUser.id, message.room.id, read);
-        if (!shouldAutoReply(otherSettings, tracking, now)) {
+        if (!shouldAutoReply(otherSettings, tracking, otherTz, now)) {
             return;
         }
-        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, now));
+        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now));
         tracking.lastReplyAt = now;
         await updateChatTracking(otherUser.id, message.room.id, tracking, persistence);
     }
@@ -180,12 +183,13 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 continue;
             }
             const settings = await getAutoReplySettings(mentionedUser.id, read);
-            if (!isAutoReplyActive(settings, now) || !settings.replyToMentions || isUserExcluded(settings, sender.id)) {
+            const mentionedTz = resolveTzMinutes(mentionedUser, settings);
+            if (!isAutoReplyActive(settings, mentionedTz, now) || !settings.replyToMentions || isUserExcluded(settings, sender.id)) {
                 continue;
             }
             const tracking = await getChatTracking(mentionedUser.id, message.room.id, read);
-            if (shouldAutoReply(settings, tracking, now)) {
-                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, now));
+            if (shouldAutoReply(settings, tracking, mentionedTz, now)) {
+                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now));
                 tracking.lastReplyAt = now;
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
@@ -325,6 +329,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
         const settings: IAutoReplySettings = {
             ...previous,
+            schedulers: [],
             message: messageText || previous.message,
             users: Array.isArray(submitted.ExcludeUsers) ? excludedUsers : previous.users,
             frequency,
@@ -394,8 +399,15 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         const windowMessage = typeof form.WindowMessage === 'string' && form.WindowMessage.trim() ? form.WindowMessage : undefined;
         const settings: IAutoReplySettings = {
             ...previous,
+            schedulers: [],
             mode: 'until',
-            until: { start, end: until, message: windowMessage },
+            until: {
+                start,
+                end: until,
+                startWall: epochToWall(start, tz),
+                endWall: epochToWall(until, tz),
+                message: windowMessage,
+            },
             // remember the chosen timezone as the fallback for next time
             timezoneOffsetMinutes: tz,
             enabledAt: start <= now ? now : previous.enabledAt,
@@ -452,6 +464,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
 
         if (data.actionId === 'TurnOn') {
+            settings.schedulers = [];
             settings.mode = 'always';
             settings.until = undefined;
             settings.enabledAt = Date.now();
@@ -461,6 +474,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             );
         }
         if (data.actionId === 'TurnOff') {
+            settings.schedulers = [];
             settings.mode = 'off';
             settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
@@ -470,7 +484,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
         if (data.actionId === 'OpenUntilForm') {
             const tz = resolveTzMinutes(data.user, settings);
-            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz);
+            const existing = settings.mode === 'until' ? settings.until : undefined;
+            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz, existing);
             return context.getInteractionResponder().openModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();

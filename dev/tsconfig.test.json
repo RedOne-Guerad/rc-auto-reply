@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "commonjs",
+    "lib": ["es2017"],
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "outDir": "../.testout",
+    "skipLibCheck": true
+  },
+  "include": ["../src/utils/helpers.ts"]
+}

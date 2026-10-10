@@ -3,7 +3,7 @@ import { IAutoReplySettings, COOLDOWN_PRESETS_HOURS } from "../utils/IAutoReplyS
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
 import {
     newId, formatOffsetMinutes, formatInTz, formatDurationUntil,
-    isAutoReplyActive, resolveTzMinutes,
+    isAutoReplyActive, resolveTzMinutes, windowBounds,
 } from "../utils/helpers";
 import { ButtonStyle, BlockBuilder } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
@@ -25,16 +25,17 @@ export function statusLine(settings: IAutoReplySettings, user: IUser, lang: AppL
         return translate('bar_status_on', lang);
     }
     if (settings.mode === 'until' && settings.until) {
-        if (now < settings.until.start) {
+        const bounds = windowBounds(settings.until, tz);
+        if (now < bounds.start) {
             return translate('bar_status_scheduled', lang, {
-                from: formatInTz(settings.until.start, tz),
-                until: formatInTz(settings.until.end, tz),
+                from: formatInTz(bounds.start, tz),
+                until: formatInTz(bounds.end, tz),
             });
         }
-        if (isAutoReplyActive(settings, now)) {
+        if (isAutoReplyActive(settings, tz, now)) {
             return translate('bar_status_until', lang, {
-                until: formatInTz(settings.until.end, tz),
-                duration: formatDurationUntil(settings.until.end),
+                until: formatInTz(bounds.end, tz),
+                duration: formatDurationUntil(bounds.end, now),
             });
         }
     }
@@ -52,14 +53,23 @@ export function buildSettingsBlocks(
     banner?: string,
 ): BlockBuilder {
     const { message, users, frequency, cooldownHours, replyToMentions } = autoReplySettings;
+    const legacySchedulers = (autoReplySettings.schedulers ?? []).length > 0;
     const lang = context.language;
     const block = modify.getCreator().getBlockBuilder();
     const now = Date.now();
+    const tz = resolveTzMinutes(context.user, autoReplySettings);
 
     if (banner) {
         block.addSectionBlock({
             blockId: SETTINGS_BLOCK,
             text: block.newMarkdownTextObject(banner),
+        });
+        block.addDividerBlock();
+    } else if (legacySchedulers) {
+        // one-time notice: 2.1 recurring schedules are gone, cleared on next save
+        block.addSectionBlock({
+            blockId: SETTINGS_BLOCK,
+            text: block.newMarkdownTextObject(translate('legacy_schedulers', lang)),
         });
         block.addDividerBlock();
     }
@@ -76,7 +86,7 @@ export function buildSettingsBlocks(
         text: block.newMarkdownTextObject(statusLine(autoReplySettings, context.user, lang)),
     });
 
-    const active = isAutoReplyActive(autoReplySettings, now);
+    const active = isAutoReplyActive(autoReplySettings, tz, now);
 
     if (!active) {
         block.addActionsBlock({

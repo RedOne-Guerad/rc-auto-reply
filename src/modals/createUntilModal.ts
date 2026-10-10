@@ -2,7 +2,8 @@ import { IModify } from "@rocket.chat/apps-engine/definition/accessors";
 import { hoursOfDay, endOfDayHour, newId, timezoneOffsetOptions } from "../utils/helpers";
 import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
-import { IAutoReplySettings } from "../utils/IAutoReplySettings";
+import { IAutoReplySettings, IUntilWindow } from "../utils/IAutoReplySettings";
+import { wallToEpoch } from "../utils/helpers";
 import { AppLanguage, translate } from "../i18n/translations";
 
 export const UNTIL_FORM_BLOCK = 'arUntilForm';
@@ -17,7 +18,14 @@ export async function createUntilModal(
     language: AppLanguage = 'en',
     /** initial timezone (minutes) — the caller resolves profile vs fallback */
     tzMinutes: number = 0,
+    /** existing window to prefill when rescheduling */
+    existing?: IUntilWindow,
 ): Promise<IUIKitModalViewParam> {
+    // prefill values (wall clock "YYYY-MM-DDTHH:mm") from the existing window
+    const startWallDate = existing?.startWall ? existing.startWall.substring(0, 10) : undefined;
+    const startWallTime = existing?.startWall ? existing.startWall.substring(11, 16) : undefined;
+    const endWallDate = existing?.endWall ? existing.endWall.substring(0, 10) : undefined;
+    const endWallTime = existing?.endWall ? existing.endWall.substring(11, 16) : undefined;
     const block = modify.getCreator().getBlockBuilder();
     const hourOptions = hoursOfDay.map((h) => ({
         text: block.newPlainTextObject(h.text),
@@ -52,7 +60,7 @@ export async function createUntilModal(
                 { text: block.newPlainTextObject(translate('bar_start_tomorrow', language)), value: 'tomorrow' },
                 { text: block.newPlainTextObject(translate('bar_start_date', language)), value: 'custom' },
             ],
-            initialValue: 'now',
+            initialValue: existing && existing.startWall ? 'custom' : 'now',
         }),
         label: block.newPlainTextObject(translate('bar_start_from', language)),
     });
@@ -62,6 +70,7 @@ export async function createUntilModal(
         element: block.newPlainTextInputElement({
             actionId: 'StartDate',
             placeholder: block.newPlainTextObject('2026-10-12'),
+            initialValue: startWallDate,
         }),
         label: block.newPlainTextObject(translate('bar_start_date', language)),
     });
@@ -71,7 +80,7 @@ export async function createUntilModal(
         element: block.newStaticSelectElement({
             actionId: 'StartHour',
             options: hourOptions,
-            initialValue: '09:00',
+            initialValue: startWallTime && hourOptions.some((h) => h.value === startWallTime) ? startWallTime : '09:00',
         }),
         label: block.newPlainTextObject(translate('bar_until_time', language)),
     });
@@ -90,7 +99,7 @@ export async function createUntilModal(
                 { text: block.newPlainTextObject('+14'), value: '2weeks' },
                 { text: block.newPlainTextObject(translate('bar_until_date', language)), value: 'custom' },
             ],
-            initialValue: 'tomorrow',
+            initialValue: endWallDate ? 'custom' : 'tomorrow',
         }),
         label: block.newPlainTextObject(translate('bar_window_until', language)),
     });
@@ -100,6 +109,7 @@ export async function createUntilModal(
         element: block.newPlainTextInputElement({
             actionId: 'UntilDate',
             placeholder: block.newPlainTextObject('2026-10-15'),
+            initialValue: endWallDate,
         }),
         label: block.newPlainTextObject(translate('bar_until_date', language)),
     });
@@ -109,7 +119,7 @@ export async function createUntilModal(
         element: block.newStaticSelectElement({
             actionId: 'UntilHour',
             options: endHourOptions,
-            initialValue: endOfDayHour.value,
+            initialValue: endWallTime && endHourOptions.some((h) => h.value === endWallTime) ? endWallTime : endOfDayHour.value,
         }),
         label: block.newPlainTextObject(translate('bar_until_time', language)),
     });
@@ -119,7 +129,7 @@ export async function createUntilModal(
         optional: true,
         element: block.newPlainTextInputElement({
             actionId: 'WindowMessage',
-            initialValue: settings.message,
+            initialValue: existing?.message ?? settings.message,
             multiline: true,
         }),
         label: block.newPlainTextObject(translate('bar_window_custom_message', language)),

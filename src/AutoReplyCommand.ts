@@ -6,7 +6,7 @@ import { IUser } from '@rocket.chat/apps-engine/definition/users';
 import { IAutoReplySettings, ReplyFrequency, COOLDOWN_PRESETS_HOURS } from './utils/IAutoReplySettings';
 import {
     getAutoReplySettings, sendNotifyMessage, getLanguage, isUserExcluded, formatOffsetMinutes,
-    parseWhen, resolveTzMinutes, formatInTz, formatDurationUntil, isAutoReplyActive, messageFor,
+    parseWhen, resolveTzMinutes, formatInTz, formatDurationUntil, isAutoReplyActive, messageFor, epochToWall, windowBounds,
 } from './utils/helpers';
 import { AppLanguage, translate } from './i18n/translations';
 
@@ -45,6 +45,7 @@ export class AutoReplyCommand implements ISlashCommand {
                 return reply(translate('cmd_off', lang) + context.getSender().username + ' !');
             }
             case 'until':
+            case 'schedule':
                 return this.handleUntil(settings, rest, context.getSender(), read, lang, reply, persist);
             case 'from':
                 return this.handleFromUntil(settings, rest, context.getSender(), read, lang, reply, persist);
@@ -75,6 +76,7 @@ export class AutoReplyCommand implements ISlashCommand {
     ): Promise<void> {
         const updated: IAutoReplySettings = {
             ...settings,
+            schedulers: [],
             mode: 'always',
             until: undefined,
             enabledAt: Date.now(),
@@ -105,10 +107,18 @@ export class AutoReplyCommand implements ISlashCommand {
             return reply(translate('cmd_until_invalid', lang, { text: rest.slice(0, 2).join(' ') }));
         }
         const messageWords = rest.slice(whenTokens);
+        const startNow = Date.now();
         const updated: IAutoReplySettings = {
             ...settings,
+            schedulers: [],
             mode: 'until',
-            until: { start: Date.now(), end, message: messageWords.length ? messageWords.join(' ') : undefined },
+            until: {
+                start: startNow,
+                end,
+                startWall: epochToWall(startNow, tz),
+                endWall: epochToWall(end, tz),
+                message: messageWords.length ? messageWords.join(' ') : undefined,
+            },
             enabledAt: Date.now(),
         };
         await persist(updated);
@@ -153,8 +163,15 @@ export class AutoReplyCommand implements ISlashCommand {
         const message = messageTokens.join(' ');
         const updated: IAutoReplySettings = {
             ...settings,
+            schedulers: [],
             mode: 'until',
-            until: { start, end, message: message || undefined },
+            until: {
+                start,
+                end,
+                startWall: epochToWall(start, tz),
+                endWall: epochToWall(end, tz),
+                message: message || undefined,
+            },
             enabledAt: start <= Date.now() ? Date.now() : undefined,
         };
         await persist(updated);
@@ -280,16 +297,17 @@ export class AutoReplyCommand implements ISlashCommand {
         if (settings.mode === 'always') {
             lines.push(translate('cmd_status_on', lang) + settings.message);
         } else if (settings.mode === 'until' && settings.until) {
-            if (now < settings.until.start) {
+            const bounds = windowBounds(settings.until, tz);
+            if (now < bounds.start) {
                 lines.push(translate('cmd_status_until_future', lang, {
-                    from: formatInTz(settings.until.start, tz),
-                    until: formatInTz(settings.until.end, tz),
-                }) + messageFor(settings));
-            } else if (isAutoReplyActive(settings, now)) {
+                    from: formatInTz(bounds.start, tz),
+                    until: formatInTz(bounds.end, tz),
+                }) + messageFor(settings, tz, now));
+            } else if (isAutoReplyActive(settings, tz, now)) {
                 lines.push(translate('cmd_until_set', lang, {
-                    until: formatInTz(settings.until.end, tz),
-                    duration: formatDurationUntil(settings.until.end),
-                }) + messageFor(settings));
+                    until: formatInTz(bounds.end, tz),
+                    duration: formatDurationUntil(bounds.end, now),
+                }) + messageFor(settings, tz, now));
             } else {
                 lines.push(translate('cmd_status_off', lang));
             }

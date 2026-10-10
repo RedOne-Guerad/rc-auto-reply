@@ -21,7 +21,9 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
         // Deleted users can linger as null entries in old records (issue #9);
         // dropping them here heals already-affected installations on first read.
         users: (stored?.users ?? []).filter(Boolean),
-        schedulers: [],
+        // legacy 2.1 entries pass through so the settings UI can show the
+        // migration notice; every save clears them
+        schedulers: stored?.schedulers ?? [],
         frequency: stored?.frequency ?? 'every',
         cooldownHours: stored?.cooldownHours ?? DEFAULT_COOLDOWN_HOURS,
         replyToMentions: stored?.replyToMentions ?? false,
@@ -59,28 +61,62 @@ function chatTrackingAssocs(awayUserId: string, roomId: string): Array<RocketCha
     ];
 }
 
+
+const WALL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+/** "YYYY-MM-DDTHH:mm" in tzMinutes -> epoch ms. */
+export function wallToEpoch(wall: string, tzMinutes: number): number {
+    const m = wall.match(WALL_RE);
+    if (!m) {
+        return NaN;
+    }
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])) - tzMinutes * 60000;
+}
+
+/** epoch ms -> "YYYY-MM-DDTHH:mm" in tzMinutes. */
+export function epochToWall(epochMs: number, tzMinutes: number): string {
+    const d = new Date(epochMs + tzMinutes * 60000);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+/**
+ * Window bounds for evaluation: recomputed from the wall clock with the
+ * user's live timezone when available (DST-proof), falling back to the
+ * stored epochs (windows created before 2.2.1 or without wall fields).
+ */
+export function windowBounds(window: { start: number; end: number; startWall?: string; endWall?: string }, tzMinutes: number): { start: number; end: number } {
+    const start = window.startWall ? wallToEpoch(window.startWall, tzMinutes) : window.start;
+    const end = window.endWall ? wallToEpoch(window.endWall, tzMinutes) : window.end;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return { start: window.start, end: window.end };
+    }
+    return { start, end };
+}
+
 /** Whether auto-reply is active for the settings right now (mode + timed window). */
-export function isAutoReplyActive(settings: IAutoReplySettings, now = Date.now()): boolean {
+export function isAutoReplyActive(settings: IAutoReplySettings, tzMinutes = 0, now = Date.now()): boolean {
     if (settings.mode === 'always') {
         return true;
     }
     if (settings.mode === 'until' && settings.until) {
-        return settings.until.start <= now && now < settings.until.end;
+        const { start, end } = windowBounds(settings.until, tzMinutes);
+        return start <= now && now < end;
     }
     return false;
 }
 
 /** The message to send: a per-window message wins while it is active. */
-export function messageFor(settings: IAutoReplySettings, now = Date.now()): string {
-    if (settings.mode === 'until' && settings.until?.message && settings.until.start <= now && now < settings.until.end) {
+export function messageFor(settings: IAutoReplySettings, tzMinutes = 0, now = Date.now()): string {
+    if (settings.mode === 'until' && settings.until?.message && isAutoReplyActive(settings, tzMinutes, now)) {
         return settings.until.message;
     }
     return settings.message;
 }
 
 /** Whether an auto-reply should be sent for this conversation right now. */
-export function shouldAutoReply(settings: IAutoReplySettings, tracking: IChatTracking, now = Date.now()): boolean {
-    if (!isAutoReplyActive(settings, now)) {
+export function shouldAutoReply(settings: IAutoReplySettings, tracking: IChatTracking, tzMinutes = 0, now = Date.now()): boolean {
+    if (!isAutoReplyActive(settings, tzMinutes, now)) {
         return false;
     }
     const frequency: ReplyFrequency = settings.frequency ?? 'every';
@@ -200,11 +236,19 @@ export function parseWhen(text: string, tzMinutes: number, now = Date.now()): nu
 
     const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/);
     if (iso) {
-        return utcToEpoch(Number(iso[1]), Number(iso[2]), Number(iso[3]), iso[4] ? Number(iso[4]) : 0, iso[5] ? Number(iso[5]) : 0, tzMinutes);
+        const mo = Number(iso[2]);
+        const day = Number(iso[3]);
+        const hh = iso[4] ? Number(iso[4]) : 0;
+        const mi = iso[5] ? Number(iso[5]) : 0;
+        if (mo < 1 || mo > 12 || day < 1 || day > 31 || hh > 23 || mi > 59) {
+            return null;
+        }
+        return utcToEpoch(Number(iso[1]), mo, day, hh, mi, tzMinutes);
     }
 
     const words = trimmed.split(/\s+/);
     let dayDelta = 0;
+    let weekdayNamed = false;
     const first = words[0];
     if (first === 'today') {
         dayDelta = 0;
@@ -216,6 +260,7 @@ export function parseWhen(text: string, tzMinutes: number, now = Date.now()): nu
         const target = WEEKDAYS.findIndex((w) => w.toLowerCase() === first);
         if (target >= 0) {
             dayDelta = (target - local.getUTCDay() + 7) % 7;
+            weekdayNamed = true;
             words.shift();
         }
     }
@@ -233,11 +278,15 @@ export function parseWhen(text: string, tzMinutes: number, now = Date.now()): nu
         hasTime = true;
     }
 
+    // a weekday named with no time, on that very weekday, means next week
+    if (!hasTime && dayDelta === 0 && weekdayNamed) {
+        dayDelta = 7;
+    }
     const result = utcToEpoch(todayY, todayM, todayD + dayDelta, h, m, tzMinutes);
     if (result <= now) {
         if (!hasTime) {
-            // "today"/"monday" with no time already passed -> next occurrence at 00:00? treat as next day 00:00
-            return utcToEpoch(todayY, todayM, todayD + Math.max(dayDelta, 0) + 1, 0, 0, tzMinutes);
+            // "today" with no time already passed -> tomorrow 00:00
+            return utcToEpoch(todayY, todayM, todayD + 1, 0, 0, tzMinutes);
         }
         return result + 24 * 3600 * 1000;
     }

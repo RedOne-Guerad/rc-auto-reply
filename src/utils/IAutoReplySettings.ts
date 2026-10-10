@@ -8,8 +8,17 @@ export type AutoReplyMode = 'off' | 'always' | 'until';
  * window is created (see parseWhen / resolveTzMinutes in helpers).
  */
 export interface IUntilWindow {
+    /** epoch ms — authoritative when the wall-clock fields are absent */
     start: number;
     end: number;
+    /**
+     * Wall-clock representation ("YYYY-MM-DDTHH:mm" in the user's timezone),
+     * kept alongside the epochs so a window survives daylight-saving changes:
+     * the epochs are recomputed from the wall clock with the user's live
+     * timezone offset whenever the window is evaluated.
+     */
+    startWall?: string;
+    endWall?: string;
     message?: string;
 }
 

@@ -45,9 +45,6 @@
         },
         {
             "name": "persistence"
-        },
-        {
-            "name": "scheduler"
         }
     ]
 }
