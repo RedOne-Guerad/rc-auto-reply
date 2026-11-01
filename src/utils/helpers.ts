@@ -150,10 +150,15 @@ export function isRoomEncrypted(room: IRoom): boolean {
     return (room as unknown as { encrypted?: boolean }).encrypted === true;
 }
 
-/** Resolves the app language from the server's Language setting. */
+/**
+ * Resolves the app language from the server's Language setting.
+ * Note: getServerSettings(), not getSettings() — the latter reads the
+ * app's own settings (of which there are none), so the app would always
+ * fall back to English (found by @ndo84bw in issue #20).
+ */
 export async function getLanguage(read: IRead): Promise<AppLanguage> {
     try {
-        const language = await read.getEnvironmentReader().getSettings().getValueById('Language');
+        const language = await read.getEnvironmentReader().getServerSettings().getValueById('Language');
         return normalizeLanguage(language);
     } catch {
         return 'en';

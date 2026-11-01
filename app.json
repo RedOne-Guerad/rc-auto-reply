@@ -20,6 +20,9 @@
             "name": "ui.registerButtons"
         },
         {
+            "name": "server-setting.read"
+        },
+        {
             "name": "slashcommand"
         },
         {
