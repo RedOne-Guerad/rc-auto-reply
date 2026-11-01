@@ -13,7 +13,7 @@ A [Rocket.Chat](https://rocket.chat) app that automatically answers incoming **d
 - **Mention replies** (opt-in) — also auto-reply when you are @mentioned in channels/private groups.
 - **Timed auto-reply** (new in 2.2.0) — schedule a window (`until friday 17:00`) with an optional message just for that period; the timezone is picked in the schedule form (defaults to your profile timezone). Nothing is switched behind your back: the window is evaluated when a message arrives, and the panel always shows the current status ("ON until Tue 13 Oct, 00:00 — 3d 0h left").
 - **Settings from the user menu** (new in 2.2.0) — a modal under your avatar → Apps, reachable from anywhere including encrypted rooms; after saving it confirms "✅ Saved" with the current status.
-- **Timezone from your profile** (new in 2.2.0) — windows use your Rocket.Chat profile timezone (DST included); a manual fallback exists for profiles without one.
+- **Timezone from your profile** (new in 2.2.0) — schedules use your Rocket.Chat profile timezone, picked in the schedule form; a manual fallback exists for profiles without one. Windows are stored in wall-clock form and re-evaluated with your live offset, so they stay correct across daylight-saving changes.
 - **E2EE-safe** — in end-to-end encrypted rooms the app stays silent (see [limitations](#limitations)).
 - Localized UI/notifications in **English, Russian and Lithuanian** (follows the server language).
 - Gentler reminders: the "auto-reply is enabled, want to disable it?" prompt appears at most once per hour per conversation.
@@ -59,7 +59,7 @@ If you text a user while your auto-reply is enabled, you will get options to dis
 
 - **End-to-end encrypted (E2EE) rooms**: apps run server-side and cannot read or produce encrypted content. To avoid leaking plaintext into encrypted conversations, Auto-Reply does not reply in E2EE rooms at all (issue #8). Use regular DMs/channels.
 - The exclusion list in the room panel offers the users of the conversation you opened it from; use `remove-user`/`include-user` for anyone else. The user-menu modal works everywhere.
-- 2.1 "schedulers" (daily/weekly recurring) were replaced in 2.2.0 by timed windows (`until`); if you created a schedule in 2.1, recreate it as a timed window. Old settings otherwise migrate automatically.
+- 2.1 "schedulers" (daily/weekly recurring) were replaced in 2.2.0 by timed windows (`until`). If you created a schedule in 2.1, the settings panel shows a one-time notice and you can recreate it as a timed window. Old settings otherwise migrate automatically.
 
 ## Local development
 
