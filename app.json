@@ -1,6 +1,6 @@
 {
     "id": "821cd5c6-1fb5-4d9e-8e88-e6176463efb6",
-    "version": "2.1.3",
+    "version": "2.2.0",
     "requiredApiVersion": "^1.36.0",
     "iconFile": "auto-reply.png",
     "author": {
@@ -18,6 +18,9 @@
     "permissions": [
         {
             "name": "ui.registerButtons"
+        },
+        {
+            "name": "server-setting.read"
         },
         {
             "name": "slashcommand"
@@ -45,9 +48,6 @@
         },
         {
             "name": "persistence"
-        },
-        {
-            "name": "scheduler"
         }
     ]
 }

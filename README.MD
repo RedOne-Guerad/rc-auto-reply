@@ -5,13 +5,15 @@ A [Rocket.Chat](https://rocket.chat) app that automatically answers incoming **d
 ## Features
 
 - **Custom away message** per user, sent under your own name as a message alias.
-- **Reply frequency** per conversation (new in 2.1.0):
+- **Reply frequency** per conversation:
   - `every` — reply to every incoming message (default),
-  - `once` — reply only once per conversation until you re-enable auto-reply,
-  - `cooldown` — reply at most once every N hours (default 24, configurable).
+  - `once` — reply only once per conversation until you switch auto-reply off and on again,
+  - `cooldown` — reply at most once every N hours (presets from 1 h to 1 week).
 - **Exclusion list** — never auto-reply to selected users.
 - **Mention replies** (opt-in) — also auto-reply when you are @mentioned in channels/private groups.
-- **Schedulers** (new in 2.1.0) — enable/disable auto-reply automatically at set times (daily or per weekdays), with a configurable timezone.
+- **Timed auto-reply** (new in 2.2.0) — schedule a window (`until friday 17:00`) with an optional message just for that period; the timezone is picked in the schedule form (defaults to your profile timezone). Nothing is switched behind your back: the window is evaluated when a message arrives, and the panel always shows the current status ("ON until Tue 13 Oct, 00:00 — 3d 0h left").
+- **Settings from the user menu** (new in 2.2.0) — a modal under your avatar → Apps, reachable from anywhere including encrypted rooms; after saving it confirms "✅ Saved" with the current status.
+- **Timezone from your profile** (new in 2.2.0) — schedules use your Rocket.Chat profile timezone, picked in the schedule form; a manual fallback exists for profiles without one. Windows are stored in wall-clock form and re-evaluated with your live offset, so they stay correct across daylight-saving changes.
 - **E2EE-safe** — in end-to-end encrypted rooms the app stays silent (see [limitations](#limitations)).
 - Localized UI/notifications in **English, Russian and Lithuanian** (follows the server language).
 - Gentler reminders: the "auto-reply is enabled, want to disable it?" prompt appears at most once per hour per conversation.
@@ -39,21 +41,25 @@ If you text a user while your auto-reply is enabled, you will get options to dis
 ### Slash commands
 
 ```
-/auto-reply enable [your away message]   enable (optionally set the message)
-/auto-reply disable                     disable
-/auto-reply status | list               show current settings
-/auto-reply remove-user <id|username>   stop auto-replying to a user
-/auto-reply include-user <id|username>  resume auto-replying to a user
+/auto-reply on [message]                 on until you turn it off (alias: enable)
+/auto-reply off                          off; also ends any timed window (alias: disable)
+/auto-reply until <when> [message]       on from now until <when> — e.g. until friday 17:00,
+                                         until tomorrow, until 18:00, until 2026-10-12 09:00
+/auto-reply from <when> until <when> [message]
+                                         schedule a future window
+/auto-reply status | list                show current settings
+/auto-reply remove-user <id|username>    stop auto-replying to a user
+/auto-reply include-user <id|username>   resume auto-replying to a user
 /auto-reply frequency every|once|cooldown [hours]
-/auto-reply mentions on|off             reply when mentioned in channels
-/auto-reply timezone +2                 scheduler timezone (e.g. -5, +5.5)
+/auto-reply mentions on|off              reply when mentioned in channels
+/auto-reply timezone +2                  fallback timezone for schedules (e.g. -5)
 ```
 
 ## Limitations
 
 - **End-to-end encrypted (E2EE) rooms**: apps run server-side and cannot read or produce encrypted content. To avoid leaking plaintext into encrypted conversations, Auto-Reply does not reply in E2EE rooms at all (issue #8). Use regular DMs/channels.
-- **Schedulers override the manual toggle**: while a scheduler exists, the on/off state follows the schedule (recomputed every 5 minutes).
-- The exclusion list in the panel offers the users of the conversation you opened it from; use `remove-user`/`include-user` for anyone else.
+- The exclusion list in the room panel offers the users of the conversation you opened it from; use `remove-user`/`include-user` for anyone else. The user-menu modal works everywhere.
+- 2.1 "schedulers" (daily/weekly recurring) were replaced in 2.2.0 by timed windows (`until`). If you created a schedule in 2.1, the settings panel shows a one-time notice and you can recreate it as a timed window. Old settings otherwise migrate automatically.
 
 ## Local development
 

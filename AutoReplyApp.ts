@@ -11,13 +11,13 @@ import { IMessage, IPostMessageSent } from '@rocket.chat/apps-engine/definition/
 import { RocketChatAssociationModel, RocketChatAssociationRecord } from '@rocket.chat/apps-engine/definition/metadata';
 import { RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 import { IUser } from '@rocket.chat/apps-engine/definition/users';
-import { StartupType } from '@rocket.chat/apps-engine/definition/scheduler';
 
-import { IAutoReplySettings, IScheduler, ReplyFrequency, SchedulerType } from './src/utils/IAutoReplySettings';
+import { IAutoReplySettings, COOLDOWN_PRESETS_HOURS } from './src/utils/IAutoReplySettings';
 import { AutoReplyCommand } from './src/AutoReplyCommand';
 import { RoomTypeFilter, UIActionButtonContext } from '@rocket.chat/apps-engine/definition/ui';
 import { ButtonStyle, IUIKitResponse, UIKitActionButtonInteractionContext, UIKitBlockInteractionContext, UIKitViewSubmitInteractionContext } from '@rocket.chat/apps-engine/definition/uikit';
 import {
+    windowBounds, epochToWall, wallToEpoch,
     getAutoReplySettings,
     sendMessage,
     sendNotifyMessage,
@@ -25,15 +25,17 @@ import {
     getChatTracking,
     updateChatTracking,
     shouldAutoReply,
+    isAutoReplyActive,
+    messageFor,
     isUserExcluded,
     isRoomEncrypted,
+    resolveTzMinutes,
     NOTIFY_THROTTLE_MS,
-    newId,
 } from './src/utils/helpers';
-import { createContextualBarView, IContextualBarContext } from './src/modals/createContextualBarView';
-import { createSchedulerModal } from './src/modals/createSchedulerModal';
-import { SCHEDULER_TICK_PROCESSOR_ID, SCHEDULER_TICK_INTERVAL, desiredStateFromSchedulers, getSchedulerUserIds, syncSchedulerRegistry } from './src/scheduler';
-import { AppLanguage, translate } from './src/i18n/translations';
+import { buildSettingsBlocks, createContextualBarView, IBarContext, statusLine } from './src/modals/createContextualBarView';
+import { createSettingsModal, USER_MODAL_PREFIX } from './src/modals/createSettingsModal';
+import { createUntilModal, UNTIL_FORM_BLOCK } from './src/modals/createUntilModal';
+import { translate } from './src/i18n/translations';
 
 const SETTINGS_BLOCK = 'autoReplySettings';
 
@@ -59,8 +61,10 @@ export class AutoReplyApp extends App implements IPostMessageSent {
     }
 
     /**
-     * Executes after a message is sent and sends auto-replies when the
-     * recipient (DM) or a mentioned user (channels) has auto-reply enabled.
+     * Executes after a message is sent; auto-replies when the recipient (DM)
+     * or a mentioned user (channels) has auto-reply active — where "active"
+     * means on, or inside the timed window (mode 'until'). Nothing is ever
+     * switched in the background.
      */
     public async executePostMessageSent(message: IMessage, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<void> {
         try {
@@ -75,7 +79,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             const room = message.room;
             // E2EE safety net: even if the room flag is not propagated to the
             // apps-engine room object, encrypted messages carry type 'e2e'
-            // typed via cast: older engine typings lack IMessage.type
+            // (typed via cast: older engine typings lack IMessage.type)
             if (!room || isRoomEncrypted(room) || (message as { type?: string }).type === 'e2e') {
                 return;
             }
@@ -105,12 +109,14 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             return;
         }
 
+        const now = Date.now();
         const mySettings = await getAutoReplySettings(me.id, read);
+        const myTz = resolveTzMinutes(me, mySettings);
 
-        // If my auto-reply is on while I am typing, offer to disable it (throttled)
-        if (mySettings.on && !isUserExcluded(mySettings, otherUser.id)) {
+        // If my auto-reply is active while I am typing, offer to disable it (throttled)
+        if (isAutoReplyActive(mySettings, myTz, now) && !isUserExcluded(mySettings, otherUser.id)) {
             const tracking = await getChatTracking(me.id, message.room.id, read);
-            if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
+            if (now - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
                 const lang = await getLanguage(read);
                 const block = modify.getCreator().getBlockBuilder();
                 // UIKit buttons (not legacy msg_in_chat_window actions, which
@@ -138,22 +144,23 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                     ],
                 });
                 await sendNotifyMessage(this, modify, message.room, me, translate('notify_enabled_prompt', lang), undefined, block);
-                tracking.lastNotifyAt = Date.now();
+                tracking.lastNotifyAt = now;
                 await updateChatTracking(me.id, message.room.id, tracking, persistence);
             }
         }
 
-        // auto-reply from the other user, if enabled for me
+        // auto-reply from the other user, if active for me
         const otherSettings = await getAutoReplySettings(otherUser.id, read);
-        if (!otherSettings.on || isUserExcluded(otherSettings, me.id)) {
+        const otherTz = resolveTzMinutes(otherUser, otherSettings);
+        if (!isAutoReplyActive(otherSettings, otherTz, now) || isUserExcluded(otherSettings, me.id)) {
             return;
         }
         const tracking = await getChatTracking(otherUser.id, message.room.id, read);
-        if (!shouldAutoReply(otherSettings, tracking)) {
+        if (!shouldAutoReply(otherSettings, tracking, otherTz, now)) {
             return;
         }
-        await sendMessage(this, modify, message.room, otherUser, otherSettings.message);
-        tracking.lastReplyAt = Date.now();
+        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now));
+        tracking.lastReplyAt = now;
         await updateChatTracking(otherUser.id, message.room.id, tracking, persistence);
     }
 
@@ -163,6 +170,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (mentioned.length === 0) {
             return;
         }
+        const now = Date.now();
         const lang = await getLanguage(read);
         for (const username of mentioned) {
             let mentionedUser: IUser | undefined;
@@ -175,16 +183,17 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 continue;
             }
             const settings = await getAutoReplySettings(mentionedUser.id, read);
-            if (!settings.on || !settings.replyToMentions || isUserExcluded(settings, sender.id)) {
+            const mentionedTz = resolveTzMinutes(mentionedUser, settings);
+            if (!isAutoReplyActive(settings, mentionedTz, now) || !settings.replyToMentions || isUserExcluded(settings, sender.id)) {
                 continue;
             }
             const tracking = await getChatTracking(mentionedUser.id, message.room.id, read);
-            if (shouldAutoReply(settings, tracking)) {
-                await sendMessage(this, modify, message.room, mentionedUser, settings.message);
-                tracking.lastReplyAt = Date.now();
+            if (shouldAutoReply(settings, tracking, mentionedTz, now)) {
+                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now));
+                tracking.lastReplyAt = now;
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
-            if (Date.now() - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
+            if (now - (tracking.lastNotifyAt ?? 0) >= NOTIFY_THROTTLE_MS) {
                 const block = modify.getCreator().getBlockBuilder();
                 block.addSectionBlock({ text: block.newMarkdownTextObject(translate('notify_enabled_prompt', lang)) });
                 block.addActionsBlock({
@@ -202,15 +211,14 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                     ],
                 });
                 await sendNotifyMessage(this, modify, message.room, mentionedUser, translate('notify_enabled_prompt', lang), undefined, block);
-                tracking.lastNotifyAt = Date.now();
+                tracking.lastNotifyAt = now;
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
         }
     }
 
     /**
-     * Registers the UI room-action button, the slash command and the
-     * scheduler tick processor.
+     * Registers the UI buttons (room action + user menu) and the slash command.
      */
     protected async extendConfiguration(configuration: IConfigurationExtend, environmentRead: IEnvironmentRead): Promise<void> {
         configuration.ui.registerButton({
@@ -225,56 +233,35 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 ],
             },
         });
+        // reachable from anywhere, including E2EE rooms (issue #20 point 4)
+        configuration.ui.registerButton({
+            actionId: 'auto-reply-user-action-id',
+            labelI18n: 'auto-reply-room-action-name',
+            context: UIActionButtonContext.USER_DROPDOWN_ACTION,
+        });
         await configuration.slashCommands.provideSlashCommand(new AutoReplyCommand());
-
-        await configuration.scheduler.registerProcessors([{
-            id: SCHEDULER_TICK_PROCESSOR_ID,
-            startupSetting: {
-                type: StartupType.RECURRING,
-                interval: SCHEDULER_TICK_INTERVAL,
-                data: {},
-            },
-            processor: async (_jobContext, read, _modify, _http, persis) => {
-                await this.runSchedulerTick(read, persis);
-            },
-        }]);
     }
 
-    /** Recomputes on/off from every registered user's schedulers. */
-    private async runSchedulerTick(read: IRead, persistence: IPersistence): Promise<void> {
-        const userIds = await getSchedulerUserIds(read);
-        for (const userId of userIds) {
-            try {
-                const settings = await getAutoReplySettings(userId, read);
-                const desired = desiredStateFromSchedulers(settings);
-                if (desired === undefined || desired === settings.on) {
-                    continue;
-                }
-                settings.on = desired;
-                settings.enabledAt = desired ? Date.now() : settings.enabledAt;
-                const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, userId);
-                await persistence.updateByAssociation(assoc, settings, true);
-                this.getLogger().debug({ msg: 'scheduler toggled auto-reply', userId, on: desired });
-            } catch (error) {
-                this.getLogger().error({ msg: 'scheduler tick failed for user', userId, error: String(error) });
-            }
-        }
-    }
-
-    /** Opens the contextual bar from the room "Apps" action. */
+    /** Opens the contextual bar (room action) or the settings modal (user menu). */
     public async executeActionButtonHandler(context: UIKitActionButtonInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
         const { actionId, user, room } = context.getInteractionData();
 
         if (actionId === 'auto-reply-room-action-id') {
             const autoReplySettings = await getAutoReplySettings(user.id, read);
             const barContext = await this.buildBarContext(user, room, read);
-            const modal = await createContextualBarView(undefined, read, http, persistence, modify, autoReplySettings, barContext);
-            return context.getInteractionResponder().openContextualBarViewResponse(modal);
+            const view = createContextualBarView(undefined, buildSettingsBlocks(modify, autoReplySettings, barContext));
+            return context.getInteractionResponder().openContextualBarViewResponse(view);
+        }
+        if (actionId === 'auto-reply-user-action-id') {
+            const autoReplySettings = await getAutoReplySettings(user.id, read);
+            const barContext = await this.buildBarContext(user, undefined, read);
+            const modal = createSettingsModal(modify, autoReplySettings, barContext);
+            return context.getInteractionResponder().openModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
     }
 
-    private async buildBarContext(user: IUser, room: { id: string; userIds?: Array<string> } | undefined, read: IRead): Promise<IContextualBarContext> {
+    private async buildBarContext(user: IUser, room: { id: string; userIds?: Array<string> } | undefined, read: IRead): Promise<IBarContext> {
         const language = await getLanguage(read);
         let dmPeer: IUser | undefined;
         if (room?.userIds) {
@@ -283,25 +270,22 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 dmPeer = await read.getUserReader().getById(otherIds[0]) ?? undefined;
             }
         }
-        return { language, dmPeer };
+        return { language, dmPeer, user };
     }
 
     /**
      * Handles view submits, routed by the shape of the view state:
-     * settings bar, daily scheduler modal or weekly scheduler modal.
+     * settings (bar or user modal) or the until form.
      */
     public async executeViewSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
         const interactionData = context.getInteractionData();
         const state = (interactionData.view.state ?? {}) as Record<string, any>;
 
         try {
-            if (state.autoReplySchedulerDaily) {
-                return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify, SchedulerType.Daily);
+            if (state[UNTIL_FORM_BLOCK]) {
+                return await this.executeUntilFormSubmitHandler(context, read, persistence, modify);
             }
-            if (state.autoReplyScheduler) {
-                return await this.executeAddSchedulerSubmitHandler(context, read, http, persistence, modify, SchedulerType.Weekly);
-            }
-            if (state.autoReplySettings) {
+            if (state[SETTINGS_BLOCK]) {
                 return await this.executeSettingsSubmitHandler(context, read, persistence, modify);
             }
             return context.getInteractionResponder().successResponse();
@@ -313,17 +297,12 @@ export class AutoReplyApp extends App implements IPostMessageSent {
 
     private async executeSettingsSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
         const interactionData = context.getInteractionData();
-        const submitted = ((interactionData.view.state ?? {}) as Record<string, any>).autoReplySettings ?? {};
+        const submitted = ((interactionData.view.state ?? {}) as Record<string, any>)[SETTINGS_BLOCK] ?? {};
         const previous = await getAutoReplySettings(interactionData.user.id, read);
-
-        const enabledClicked = submitted.EnableApp === 'Enable';
-        const disabledClicked = submitted.DisableApp === 'Disable';
-        const on = enabledClicked ? true : disabledClicked ? false : previous.on;
-        const enabledAt = enabledClicked && !previous.on ? Date.now() : previous.enabledAt;
+        const isUserModal = typeof interactionData.view.id === 'string' && interactionData.view.id.startsWith(USER_MODAL_PREFIX);
 
         const messageText = typeof submitted.AutoReplyMessage === 'string' ? submitted.AutoReplyMessage.trim() : '';
-        const frequency = selectValue(submitted.Frequency) as ReplyFrequency | undefined;
-        const cooldownRaw = Number(submitted.CooldownHours);
+        const frequencyRaw = selectValue(submitted.Frequency);
         const mentionsValue = selectValue(submitted.ReplyToMentions);
         const timezoneValue = Number(selectValue(submitted.TimezoneOffset));
 
@@ -338,85 +317,123 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             }
         }
 
+        let frequency = previous.frequency;
+        let cooldownHours = previous.cooldownHours;
+        if (frequencyRaw === 'every' || frequencyRaw === 'once') {
+            frequency = frequencyRaw;
+        } else if (typeof frequencyRaw === 'string' && frequencyRaw.startsWith('cooldown:')) {
+            const h = Number(frequencyRaw.split(':')[1]);
+            frequency = 'cooldown';
+            cooldownHours = COOLDOWN_PRESETS_HOURS.includes(h) ? h : 24;
+        }
+
         const settings: IAutoReplySettings = {
-            on,
-            enabledAt,
+            ...previous,
+            schedulers: [],
             message: messageText || previous.message,
             users: Array.isArray(submitted.ExcludeUsers) ? excludedUsers : previous.users,
-            schedulers: previous.schedulers,
-            frequency: frequency ?? previous.frequency,
-            cooldownHours: Number.isFinite(cooldownRaw) && cooldownRaw > 0 ? Math.round(cooldownRaw) : previous.cooldownHours,
+            frequency,
+            cooldownHours,
             replyToMentions: mentionsValue === 'on' ? true : mentionsValue === 'off' ? false : previous.replyToMentions,
             timezoneOffsetMinutes: Number.isFinite(timezoneValue) && timezoneValue >= -720 && timezoneValue <= 840 ? timezoneValue : previous.timezoneOffsetMinutes,
         };
 
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
         await persistence.updateByAssociation(assoc, settings, true);
-        await syncSchedulerRegistry(interactionData.user.id, settings, persistence, read);
 
-        if (interactionData.room) {
-            const lang = await getLanguage(read);
-            const notifyMsg = on
-                ? translate('notify_ar_enabled', lang) + settings.message
-                : translate('notify_ar_disabled', lang);
-            await sendNotifyMessage(this, modify, interactionData.room, interactionData.user, notifyMsg);
+        const barContext = await this.buildBarContext(interactionData.user, interactionData.room, read);
+        const status = statusLine(settings, interactionData.user, barContext.language);
+
+        if (isUserModal) {
+            // keep the modal open with the saved state (issue #20 point 4);
+            // the updated view must reuse the submitted view's id or the
+            // client drops the modal.update
+            const modal = createSettingsModal(modify, settings, barContext, status, interactionData.view.id);
+            return context.getInteractionResponder().updateModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
     }
 
-    private async executeAddSchedulerSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify, type: SchedulerType): Promise<IUIKitResponse> {
+    /** Parses the until form and switches mode to 'until'. */
+    private async executeUntilFormSubmitHandler(context: UIKitViewSubmitInteractionContext, read: IRead, persistence: IPersistence, modify: IModify): Promise<IUIKitResponse> {
         const interactionData = context.getInteractionData();
-        const state = (interactionData.view.state ?? {}) as Record<string, any>;
+        const form = ((interactionData.view.state ?? {}) as Record<string, any>)[UNTIL_FORM_BLOCK] ?? {};
+        const user = interactionData.user;
+        const previous = await getAutoReplySettings(user.id, read);
+        const formTz = Number(selectValue(form.Timezone));
+        const tz = Number.isFinite(formTz) && formTz >= -720 && formTz <= 840 ? formTz : resolveTzMinutes(user, previous);
+        const now = Date.now();
+        const local = new Date(now + tz * 60000);
+        const lang = await getLanguage(read);
 
-        let enableTime: string | undefined;
-        let disableTime: string | undefined;
-        let weekdays: string[] | undefined;
-        let message: string | undefined;
+        const startMode = selectValue(form.StartMode) ?? 'now';
+        let start = now;
+        if (startMode === 'today' || startMode === 'tomorrow') {
+            start = localToEpoch(local, startMode === 'tomorrow' ? 1 : 0, selectValue(form.StartHour) ?? '09:00', tz);
+        } else if (startMode === 'custom') {
+            const parsed = parseDate(selectValue(form.StartDate));
+            if (!parsed) {
+                return viewError(context, UNTIL_FORM_BLOCK, 'StartDate', translate('form_bad_date', lang));
+            }
+            start = Date.UTC(parsed.y, parsed.m - 1, parsed.d, hourOf(selectValue(form.StartHour) ?? '09:00'), minuteOf(selectValue(form.StartHour) ?? '09:00')) - tz * 60000;
+        }
 
-        if (type === SchedulerType.Daily) {
-            const daily = state.autoReplySchedulerDaily ?? {};
-            enableTime = selectValue(daily.EnableTime);
-            disableTime = selectValue(daily.DisableTime);
-            message = typeof daily.Message === 'string' && daily.Message.trim() ? daily.Message : undefined;
+        const untilDay = selectValue(form.UntilDay) ?? 'tomorrow';
+        let until: number;
+        if (untilDay === 'custom') {
+            const parsed = parseDate(selectValue(form.UntilDate));
+            if (!parsed) {
+                return viewError(context, UNTIL_FORM_BLOCK, 'UntilDate', translate('form_bad_date', lang));
+            }
+            const hh = selectValue(form.UntilHour) ?? '24:00';
+            until = Date.UTC(parsed.y, parsed.m - 1, parsed.d, hourOf(hh), minuteOf(hh)) - tz * 60000;
         } else {
-            const weekly = state.autoReplyScheduler ?? {};
-            enableTime = selectValue(weekly.StartSchedulerHour);
-            disableTime = selectValue(weekly.EndSchedulerHour);
-            weekdays = multiValue(weekly.SchedulerDays);
+            const dayDelta = untilDay === 'today' ? 0 : untilDay === 'tomorrow' ? 1 : untilDay === '2days' ? 2 : untilDay === '3days' ? 3 : untilDay === '1week' ? 7 : 14;
+            const hh = selectValue(form.UntilHour) ?? '24:00';
+            until = localToEpoch(local, dayDelta, hh, tz);
+        }
+        if (until <= start) {
+            return viewError(context, UNTIL_FORM_BLOCK, 'UntilDay', translate('form_bad_range', lang));
         }
 
-        if (!enableTime || !disableTime) {
-            return context.getInteractionResponder().successResponse();
-        }
-
-        const previous = await getAutoReplySettings(interactionData.user.id, read);
-        const scheduler: IScheduler = {
-            id: newId(),
-            type,
-            settings: { enableTime, disableTime, weekdays, message },
-        };
+        const windowMessage = typeof form.WindowMessage === 'string' && form.WindowMessage.trim() ? form.WindowMessage : undefined;
         const settings: IAutoReplySettings = {
             ...previous,
-            schedulers: [...(previous.schedulers ?? []), scheduler],
+            schedulers: [],
+            mode: 'until',
+            until: {
+                start,
+                end: until,
+                startWall: epochToWall(start, tz),
+                endWall: epochToWall(until, tz),
+                message: windowMessage,
+            },
+            // remember the chosen timezone as the fallback for next time
+            timezoneOffsetMinutes: tz,
+            enabledAt: start <= now ? now : previous.enabledAt,
         };
-
-        const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, interactionData.user.id);
+        const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, user.id);
         await persistence.updateByAssociation(assoc, settings, true);
-        await syncSchedulerRegistry(interactionData.user.id, settings, persistence, read);
 
-        // refresh the contextual bar it was opened from, if still open
+        // successResponse closes the modal — no duplicate submissions
+        return context.getInteractionResponder().successResponse();
+    }
+
+    /** Small visible confirmation after a notification quick action. */
+    private async notifyConfirmation(read: IRead, modify: IModify, data: { user: IUser; room?: { id: string } }, text: string): Promise<void> {
         try {
-            const barContext = await this.buildBarContext(interactionData.user, undefined, read);
-            const modal = await createContextualBarView(interactionData.view.submit?.value, read, http, persistence, modify, settings, barContext);
-            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
-        } catch {
-            return context.getInteractionResponder().successResponse();
+            const room = data.room ? await read.getRoomReader().getById(data.room.id) : undefined;
+            if (room) {
+                await sendNotifyMessage(this, modify, room, data.user, text);
+            }
+        } catch (error) {
+            this.getLogger().error({ msg: 'confirmation notify failed', error: String(error) });
         }
     }
 
     /**
-     * Handles block actions: enable/disable toggles, scheduler add and remove,
-     * and the notification quick actions (issue #13).
+     * Handles block actions: turn on/off, the until form and the
+     * notification quick actions (issue #13).
      */
     public async executeBlockActionHandler(context: UIKitBlockInteractionContext, read: IRead, http: IHttp, persistence: IPersistence, modify: IModify): Promise<any> {
         const data = context.getInteractionData();
@@ -425,8 +442,10 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         const barContext = await this.buildBarContext(data.user, data.room, read);
 
         if (data.actionId === 'NotifyDisable') {
-            settings.on = false;
+            settings.mode = 'off';
+            settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
+            await this.notifyConfirmation(read, modify, data, translate('notify_disabled_done', await getLanguage(read)));
             return context.getInteractionResponder().successResponse();
         }
         if (data.actionId === 'NotifyDisableForUser') {
@@ -435,6 +454,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
                 if (user && !isUserExcluded(settings, user.id)) {
                     settings.users = [...(settings.users ?? []), user];
                     await persistence.updateByAssociation(assoc, settings, true);
+                    await this.notifyConfirmation(read, modify, data, translate('notify_disabled_for_done', await getLanguage(read), { username: user.username || user.id }));
                 }
             }
             return context.getInteractionResponder().successResponse();
@@ -443,39 +463,40 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             return context.getInteractionResponder().successResponse();
         }
 
-        if (data.actionId === 'EnableApp') {
-            settings.on = true;
+        if (data.actionId === 'TurnOn') {
+            settings.schedulers = [];
+            settings.mode = 'always';
+            settings.until = undefined;
             settings.enabledAt = Date.now();
             await persistence.updateByAssociation(assoc, settings, true);
-            await syncSchedulerRegistry(data.user.id, settings, persistence, read);
-            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
-            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
+            return context.getInteractionResponder().updateContextualBarViewResponse(
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+            );
         }
-        if (data.actionId === 'DisableApp') {
-            settings.on = false;
+        if (data.actionId === 'TurnOff') {
+            settings.schedulers = [];
+            settings.mode = 'off';
+            settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
-            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
-            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
+            return context.getInteractionResponder().updateContextualBarViewResponse(
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+            );
         }
-        if (data.actionId === 'AddScheduler') {
-            const schedulerType = SchedulerType.Daily === data.value ? SchedulerType.Daily
-                : SchedulerType.Weekly === data.value ? SchedulerType.Weekly
-                : SchedulerType.Daily;
-            const modal = await createSchedulerModal(data.container.id, modify, schedulerType, settings, barContext.language);
+        if (data.actionId === 'OpenUntilForm') {
+            const tz = resolveTzMinutes(data.user, settings);
+            const existing = settings.mode === 'until' ? settings.until : undefined;
+            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz, existing);
             return context.getInteractionResponder().openModalViewResponse(modal);
-        }
-        if (data.actionId === 'RemoveScheduler') {
-            const index = Number(data.value);
-            if (Number.isInteger(index) && index >= 0 && index < (settings.schedulers ?? []).length) {
-                settings.schedulers = (settings.schedulers ?? []).filter((_, i) => i !== index);
-                await persistence.updateByAssociation(assoc, settings, true);
-                await syncSchedulerRegistry(data.user.id, settings, persistence, read);
-            }
-            const modal = await createContextualBarView(data.container.id, read, http, persistence, modify, settings, barContext);
-            return context.getInteractionResponder().updateContextualBarViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
     }
+}
+
+function viewError(context: UIKitViewSubmitInteractionContext, blockId: string, actionId: string, message: string): IUIKitResponse {
+    return context.getInteractionResponder().viewErrorResponse({
+        viewId: context.getInteractionData().view.id,
+        errors: { [blockId]: { [actionId]: message } },
+    } as never);
 }
 
 /** UIKit state values may arrive as plain strings or wrapped option objects. */
@@ -486,11 +507,17 @@ function selectValue(state: any): string | undefined {
     return undefined;
 }
 
-function multiValue(state: any): string[] | undefined {
-    if (state == null) return undefined;
-    if (Array.isArray(state)) return state.map((v) => selectValue(v)).filter((v): v is string => !!v);
-    const single = selectValue(state);
-    return single ? [single] : undefined;
+function hourOf(hhmm: string): number {
+    return Number(hhmm.split(':')[0]) || 0;
+}
+
+function minuteOf(hhmm: string): number {
+    return Number(hhmm.split(':')[1]) || 0;
+}
+
+/** Today + dayDelta at hh:mm, in the user's timezone. */
+function localToEpoch(local: Date, dayDelta: number, hhmm: string, tzMinutes: number): number {
+    return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + dayDelta, hourOf(hhmm), minuteOf(hhmm)) - tzMinutes * 60000;
 }
 
 function parseMentionedUsernames(text: string): string[] {
@@ -505,4 +532,22 @@ function parseMentionedUsernames(text: string): string[] {
         }
     }
     return Array.from(mentioned);
+}
+
+/** "YYYY-MM-DD" -> {y, m, d} or null. */
+function parseDate(text: string | undefined): { y: number; m: number; d: number } | null {
+    if (!text) {
+        return null;
+    }
+    const m = text.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) {
+        return null;
+    }
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) {
+        return null;
+    }
+    return { y, m: mo, d };
 }

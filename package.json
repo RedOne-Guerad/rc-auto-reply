@@ -1,11 +1,12 @@
 {
     "name": "rc-auto-reply",
-    "version": "2.1.3",
+    "version": "2.2.0",
     "private": true,
     "scripts": {
         "compile": "tsc -p tsconfig.json --noEmit",
         "deploy": "rc-apps deploy --url http://localhost:3000 --username devadmin --password 'Devpassword123!'",
-        "package": "mkdir -p /tmp/rcar-pkg && mv dev marketplace-screenshots docker-compose.yml /tmp/rcar-pkg/ && npx rc-apps package --no-compile; mv /tmp/rcar-pkg/dev /tmp/rcar-pkg/marketplace-screenshots /tmp/rcar-pkg/docker-compose.yml . 2>/dev/null; rmdir /tmp/rcar-pkg 2>/dev/null; true"
+        "package": "mkdir -p /tmp/rcar-pkg && mv dev marketplace-screenshots docker-compose.yml /tmp/rcar-pkg/ && npx rc-apps package --no-compile; mv /tmp/rcar-pkg/dev /tmp/rcar-pkg/marketplace-screenshots /tmp/rcar-pkg/docker-compose.yml . 2>/dev/null; rmdir /tmp/rcar-pkg 2>/dev/null; true",
+        "test:time": "tsc -p dev/tsconfig.test.json && node dev/test-time.js"
     },
     "devDependencies": {
         "@rocket.chat/apps-cli": "^1.14.0",

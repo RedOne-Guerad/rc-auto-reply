@@ -1,72 +1,133 @@
-import { IHttp, IModify, IPersistence, IRead } from "@rocket.chat/apps-engine/definition/accessors";
-import { IAutoReplySettings, IScheduler, SchedulerType } from "../utils/IAutoReplySettings";
+import { IModify, IRead } from "@rocket.chat/apps-engine/definition/accessors";
+import { IAutoReplySettings, COOLDOWN_PRESETS_HOURS } from "../utils/IAutoReplySettings";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
-import { newId, timezoneOffsetOptions } from "../utils/helpers";
+import {
+    newId, formatOffsetMinutes, formatInTz, formatDurationUntil,
+    isAutoReplyActive, resolveTzMinutes, windowBounds,
+} from "../utils/helpers";
 import { ButtonStyle, BlockBuilder } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
 import { AppLanguage, translate } from "../i18n/translations";
 
 const SETTINGS_BLOCK = 'autoReplySettings';
 
-export interface IContextualBarContext {
+export interface IBarContext {
     /** The other user of the DM the bar was opened from, offered as an excludable option. */
     dmPeer?: IUser;
     language: AppLanguage;
+    /** Whose settings these are (for timezone resolution from the profile). */
+    user: IUser;
 }
 
-export async function createContextualBarView(
-    viewId: any,
-    read: IRead,
-    http: IHttp,
-    persistence: IPersistence,
+export function statusLine(settings: IAutoReplySettings, user: IUser, lang: AppLanguage, now = Date.now()): string {
+    const tz = resolveTzMinutes(user, settings);
+    if (settings.mode === 'always') {
+        return translate('bar_status_on', lang);
+    }
+    if (settings.mode === 'until' && settings.until) {
+        const bounds = windowBounds(settings.until, tz);
+        if (now < bounds.start) {
+            return translate('bar_status_scheduled', lang, {
+                from: formatInTz(bounds.start, tz),
+                until: formatInTz(bounds.end, tz),
+            });
+        }
+        if (isAutoReplyActive(settings, tz, now)) {
+            return translate('bar_status_until', lang, {
+                until: formatInTz(bounds.end, tz),
+                duration: formatDurationUntil(bounds.end, now),
+            });
+        }
+    }
+    return translate('bar_status_off', lang);
+}
+
+/**
+ * Builds the settings blocks shared by the room contextual bar and the
+ * user-menu modal. An optional banner (e.g. "✅ Saved — …") goes on top.
+ */
+export function buildSettingsBlocks(
     modify: IModify,
     autoReplySettings: IAutoReplySettings,
-    context?: IContextualBarContext,
-): Promise<IUIKitModalViewParam> {
-    const {
-        on,
-        message,
-        users,
-        schedulers,
-        frequency,
-        cooldownHours,
-        replyToMentions,
-        timezoneOffsetMinutes,
-    } = autoReplySettings;
-    const lang = context?.language ?? 'en';
+    context: IBarContext,
+    banner?: string,
+): BlockBuilder {
+    const { message, users, frequency, cooldownHours, replyToMentions } = autoReplySettings;
+    const legacySchedulers = (autoReplySettings.schedulers ?? []).length > 0;
+    const lang = context.language;
     const block = modify.getCreator().getBlockBuilder();
+    const now = Date.now();
+    const tz = resolveTzMinutes(context.user, autoReplySettings);
+
+    if (banner) {
+        block.addSectionBlock({
+            blockId: SETTINGS_BLOCK,
+            text: block.newMarkdownTextObject(banner),
+        });
+        block.addDividerBlock();
+    } else if (legacySchedulers) {
+        // one-time notice: 2.1 recurring schedules are gone, cleared on next save
+        block.addSectionBlock({
+            blockId: SETTINGS_BLOCK,
+            text: block.newMarkdownTextObject(translate('legacy_schedulers', lang)),
+        });
+        block.addDividerBlock();
+    }
 
     block.addSectionBlock({
+        blockId: SETTINGS_BLOCK,
         text: block.newMarkdownTextObject(translate('bar_description', lang)),
     });
     block.addDividerBlock();
 
-    if (!on) {
+    // Status is always visible, whatever the state (nothing hides when off)
+    block.addSectionBlock({
+        blockId: SETTINGS_BLOCK,
+        text: block.newMarkdownTextObject(statusLine(autoReplySettings, context.user, lang)),
+    });
+
+    const active = isAutoReplyActive(autoReplySettings, tz, now);
+
+    if (!active) {
         block.addActionsBlock({
             blockId: SETTINGS_BLOCK,
             elements: [
                 block.newButtonElement({
-                    text: block.newPlainTextObject(translate('bar_enable', lang)),
-                    value: 'Enable',
+                    text: block.newPlainTextObject(translate('bar_turn_on', lang)),
+                    value: 'on',
                     style: ButtonStyle.PRIMARY,
-                    actionId: 'EnableApp',
+                    actionId: 'TurnOn',
+                }),
+                block.newButtonElement({
+                    text: block.newPlainTextObject(translate('bar_until_button', lang)),
+                    actionId: 'OpenUntilForm',
                 }),
             ],
         });
-        return finalize(viewId, block);
+        return block;
     }
 
-    block.addActionsBlock({
-        blockId: SETTINGS_BLOCK,
-        elements: [
-            block.newButtonElement({
-                text: block.newPlainTextObject(translate('bar_disable', lang)),
-                value: 'Disable',
-                style: ButtonStyle.DANGER,
-                actionId: 'DisableApp',
-            }),
-        ],
-    });
+    // active (always or inside the window)
+    const actions = [
+        block.newButtonElement({
+            text: block.newPlainTextObject(translate('bar_turn_off', lang)),
+            value: 'off',
+            style: ButtonStyle.DANGER,
+            actionId: 'TurnOff',
+        }),
+    ];
+    if (autoReplySettings.mode === 'until' && autoReplySettings.until) {
+        actions.push(block.newButtonElement({
+            text: block.newPlainTextObject(translate('bar_edit_window', lang)),
+            actionId: 'OpenUntilForm',
+        }));
+    } else {
+        actions.push(block.newButtonElement({
+            text: block.newPlainTextObject(translate('bar_until_button', lang)),
+            actionId: 'OpenUntilForm',
+        }));
+    }
+    block.addActionsBlock({ blockId: SETTINGS_BLOCK, elements: actions });
 
     block.addInputBlock({
         blockId: SETTINGS_BLOCK,
@@ -79,7 +140,9 @@ export async function createContextualBarView(
         label: block.newPlainTextObject(translate('bar_message_label', lang)),
     });
 
-    // Reply frequency (issue #6)
+    // Reply frequency (issue #6): presets instead of free text
+    const cooldown = cooldownHours ?? 24;
+    const presetHours = COOLDOWN_PRESETS_HOURS.includes(cooldown) ? cooldown : 24;
     block.addInputBlock({
         blockId: SETTINGS_BLOCK,
         optional: true,
@@ -88,21 +151,16 @@ export async function createContextualBarView(
             options: [
                 { text: block.newPlainTextObject(translate('bar_frequency_every', lang)), value: 'every' },
                 { text: block.newPlainTextObject(translate('bar_frequency_once', lang)), value: 'once' },
-                { text: block.newPlainTextObject(translate('bar_frequency_cooldown', lang)), value: 'cooldown' },
+                ...COOLDOWN_PRESETS_HOURS.map((h) => ({
+                    text: block.newPlainTextObject(translate('bar_cooldown_hours', lang, { hours: h })),
+                    value: `cooldown:${h}`,
+                })),
             ],
-            initialValue: frequency ?? 'every',
+            initialValue: frequency === 'once' ? 'once'
+                : frequency === 'cooldown' ? `cooldown:${presetHours}`
+                : 'every',
         }),
         label: block.newPlainTextObject(translate('bar_frequency_label', lang)),
-    });
-
-    block.addInputBlock({
-        blockId: SETTINGS_BLOCK,
-        optional: true,
-        element: block.newPlainTextInputElement({
-            actionId: 'CooldownHours',
-            initialValue: String(cooldownHours ?? 24),
-        }),
-        label: block.newPlainTextObject(translate('bar_cooldown_label', lang)),
     });
 
     // Mentions in channels (opt-in)
@@ -120,75 +178,21 @@ export async function createContextualBarView(
         label: block.newPlainTextObject(translate('bar_mentions_label', lang)),
     });
 
-    // Scheduler timezone
-    block.addInputBlock({
-        blockId: SETTINGS_BLOCK,
-        optional: true,
-        element: block.newStaticSelectElement({
-            actionId: 'TimezoneOffset',
-            options: timezoneOffsetOptions().map((opt) => ({
-                text: block.newPlainTextObject(opt.text),
-                value: opt.value,
-            })),
-            initialValue: String(timezoneOffsetMinutes ?? 0),
-        }),
-        label: block.newPlainTextObject(translate('bar_timezone_label', lang)),
-    });
-
-    // Schedulers
-    block.addSectionBlock({
-        blockId: SETTINGS_BLOCK,
-        text: block.newMarkdownTextObject(translate('bar_scheduler_section', lang)),
-        accessory:
-            block.newOverflowMenuElement({
-                options: [
-                    { text: block.newPlainTextObject(translate('bar_scheduler_daily', lang)), value: String(SchedulerType.Daily) },
-                    { text: block.newPlainTextObject(translate('bar_scheduler_weekly', lang)), value: String(SchedulerType.Weekly) },
-                ],
-                actionId: 'AddScheduler',
-            }),
-    });
-
-    if (!schedulers || schedulers.length === 0) {
-        block.addSectionBlock({
-            blockId: SETTINGS_BLOCK,
-            text: block.newMarkdownTextObject(translate('bar_scheduler_none', lang)),
-        });
-    } else {
-        schedulers.forEach((scheduler: IScheduler, index: number) => {
-            const start = scheduler.settings.enableTime ?? '--:--';
-            const end = scheduler.settings.disableTime ?? '--:--';
-            const itemText = scheduler.type === SchedulerType.Weekly
-                ? translate('bar_scheduler_weekly_item', lang, { days: (scheduler.settings.weekdays ?? []).join(', ') || '-', start, end })
-                : translate('bar_scheduler_daily_item', lang, { start, end });
-            block.addSectionBlock({
-                blockId: SETTINGS_BLOCK,
-                text: block.newMarkdownTextObject(`>*${index + 1}-* ${itemText}`),
-                accessory: block.newOverflowMenuElement({
-                    options: [
-                        { text: block.newPlainTextObject(translate('bar_remove_scheduler', lang)), value: String(index) },
-                    ],
-                    actionId: 'RemoveScheduler',
-                }),
-            });
-        });
-    }
-
-    // Excluded users: options are the union of the DM peer and current
-    // exclusions so new users can actually be excluded from the UI too.
+    // Excluded users: only meaningful with a DM peer to offer; existing
+    // exclusions are always listed so they can be removed.
     const excluded = (users ?? []).filter(Boolean);
     const options = new Map<string, IUser>();
     for (const user of excluded) {
         options.set(user.id, user);
     }
-    if (context?.dmPeer) {
+    if (context.dmPeer) {
         options.set(context.dmPeer.id, context.dmPeer);
     }
-    block.addSectionBlock({
-        blockId: SETTINGS_BLOCK,
-        text: block.newMarkdownTextObject(excluded.length > 0 ? translate('bar_excluded_title', lang) : translate('bar_excluded_empty', lang)),
-    });
-    if (options.size > 0) {
+    if (excluded.length > 0 || context.dmPeer) {
+        block.addSectionBlock({
+            blockId: SETTINGS_BLOCK,
+            text: block.newMarkdownTextObject(excluded.length > 0 ? translate('bar_excluded_title', lang) : translate('bar_excluded_empty', lang)),
+        });
         block.addActionsBlock({
             blockId: SETTINGS_BLOCK,
             elements: [
@@ -205,6 +209,14 @@ export async function createContextualBarView(
         });
     }
 
+    return block;
+}
+
+/** The room contextual bar wrapper. */
+export function createContextualBarView(
+    viewId: any,
+    block: BlockBuilder,
+): IUIKitModalViewParam {
     return finalize(viewId, block);
 }
 
