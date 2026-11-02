@@ -5,7 +5,7 @@ import {
     newId, formatOffsetMinutes, formatInTz, formatDurationUntil,
     isAutoReplyActive, resolveTzMinutes, windowBounds,
 } from "../utils/helpers";
-import { ButtonStyle, BlockBuilder } from "@rocket.chat/apps-engine/definition/uikit";
+import { ButtonStyle, BlockBuilder, BlockType } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUser } from "@rocket.chat/apps-engine/definition/users";
 import { AppLanguage, translate } from "../i18n/translations";
 
@@ -224,13 +224,21 @@ function finalize(viewId: any, block: BlockBuilder): IUIKitModalViewParam {
     return {
         id: viewId ?? newId(),
         title: block.newPlainTextObject('Auto Reply', true),
-        submit: block.newButtonElement({
+        submit: hasFields(block) ? block.newButtonElement({
             text: block.newPlainTextObject('Submit'),
             style: ButtonStyle.PRIMARY,
-        }),
+        }) : undefined,
         close: block.newButtonElement({
             text: block.newPlainTextObject('Cancel'),
         }),
         blocks: block.getBlocks(),
     };
+}
+
+/**
+ * Whether the form has anything for Submit to save. Switched off it only
+ * shows the status and the buttons, which save on their own.
+ */
+export function hasFields(block: BlockBuilder): boolean {
+    return block.getBlocks().some((b) => b.type === BlockType.INPUT);
 }
