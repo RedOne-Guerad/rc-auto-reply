@@ -327,7 +327,7 @@ export class AutoReplyCommand implements ISlashCommand {
             default:
                 lines.push(translate('cmd_list_frequency_every', lang));
         }
-        lines.push(translate('cmd_list_mentions', lang, { value: settings.replyToMentions ? 'on' : 'off' }));
+        lines.push(translate('cmd_list_mentions', lang, { value: translate(settings.replyToMentions ? 'bar_on' : 'bar_off', lang) }));
         const profileTz = Number((user as unknown as { utcOffset?: number | null }).utcOffset);
         const tzKey = Number.isFinite(profileTz) && (user as unknown as { utcOffset?: number | null }).utcOffset !== null
             ? 'cmd_list_timezone' : 'cmd_list_timezone_fallback';

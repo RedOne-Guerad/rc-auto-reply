@@ -252,7 +252,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (actionId === 'auto-reply-room-action-id') {
             const autoReplySettings = await getAutoReplySettings(user.id, read);
             const barContext = await this.buildBarContext(user, room, read);
-            const view = createContextualBarView(undefined, buildSettingsBlocks(modify, autoReplySettings, barContext));
+            const view = createContextualBarView(undefined, buildSettingsBlocks(modify, autoReplySettings, barContext), barContext.language);
             return context.getInteractionResponder().openContextualBarViewResponse(view);
         }
         if (actionId === 'auto-reply-user-action-id') {
@@ -426,7 +426,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             try {
                 const barContext = await this.buildBarContext(user, interactionData.room, read);
                 await modify.getUiController().updateContextualBarView(
-                    createContextualBarView(panelId, buildSettingsBlocks(modify, settings, barContext)),
+                    createContextualBarView(panelId, buildSettingsBlocks(modify, settings, barContext), barContext.language),
                     { triggerId: interactionData.triggerId },
                     user,
                 );
@@ -490,7 +490,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             settings.enabledAt = Date.now();
             await persistence.updateByAssociation(assoc, settings, true);
             return context.getInteractionResponder().updateContextualBarViewResponse(
-                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext), barContext.language),
             );
         }
         if (data.actionId === 'TurnOff') {
@@ -499,7 +499,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
             return context.getInteractionResponder().updateContextualBarViewResponse(
-                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext), barContext.language),
             );
         }
         if (data.actionId === 'OpenUntilForm') {

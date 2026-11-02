@@ -100,6 +100,9 @@ const en: Dictionary = {
     modal_saved: '✅ Saved — {status}',
     modal_title: 'Auto Reply',
     modal_until_title: 'Schedule Auto-Reply',
+    btn_submit: 'Submit',
+    btn_cancel: 'Cancel',
+    btn_close: 'Close',
     form_bad_date: 'Enter a valid date as YYYY-MM-DD.',
     form_bad_range: 'The end must be after the start.',
 };
@@ -190,6 +193,9 @@ const ru: Dictionary = {
     modal_saved: '✅ Сохранено — {status}',
     modal_title: 'Автоответ',
     modal_until_title: 'Расписание автоответа',
+    btn_submit: 'Сохранить',
+    btn_cancel: 'Отмена',
+    btn_close: 'Закрыть',
     form_bad_date: 'Введите дату в формате ГГГГ-ММ-ДД.',
     form_bad_range: 'Конец должен быть позже начала.',
 };
@@ -280,6 +286,9 @@ const lt: Dictionary = {
     modal_saved: '✅ Išsaugota — {status}',
     modal_title: 'Automatinis atsakymas',
     modal_until_title: 'Planuoti automatinį atsakymą',
+    btn_submit: 'Išsaugoti',
+    btn_cancel: 'Atšaukti',
+    btn_close: 'Uždaryti',
     form_bad_date: 'Įveskite datą formatu MMMM-MM-DD.',
     form_bad_range: 'Pabaiga turi būti po pradžios.',
 };
@@ -373,6 +382,9 @@ const de: Dictionary = {
     modal_saved: '✅ Gespeichert: {status}',
     modal_title: 'Auto-Reply',
     modal_until_title: 'Auto-Reply planen',
+    btn_submit: 'Speichern',
+    btn_cancel: 'Abbrechen',
+    btn_close: 'Schließen',
     form_bad_date: 'Bitte ein gültiges Datum im Format JJJJ-MM-TT eingeben.',
     form_bad_range: 'Das Ende muss nach dem Beginn liegen.',
 };

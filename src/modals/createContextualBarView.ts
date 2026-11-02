@@ -216,20 +216,21 @@ export function buildSettingsBlocks(
 export function createContextualBarView(
     viewId: any,
     block: BlockBuilder,
+    language: AppLanguage,
 ): IUIKitModalViewParam {
-    return finalize(viewId, block);
+    return finalize(viewId, block, language);
 }
 
-function finalize(viewId: any, block: BlockBuilder): IUIKitModalViewParam {
+function finalize(viewId: any, block: BlockBuilder, language: AppLanguage): IUIKitModalViewParam {
     return {
         id: viewId ?? newId(),
-        title: block.newPlainTextObject('Auto Reply', true),
+        title: block.newPlainTextObject(translate('modal_title', language), true),
         submit: hasFields(block) ? block.newButtonElement({
-            text: block.newPlainTextObject('Submit'),
+            text: block.newPlainTextObject(translate('btn_submit', language)),
             style: ButtonStyle.PRIMARY,
         }) : undefined,
         close: block.newButtonElement({
-            text: block.newPlainTextObject('Cancel'),
+            text: block.newPlainTextObject(translate('btn_cancel', language)),
         }),
         blocks: block.getBlocks(),
     };

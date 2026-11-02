@@ -27,13 +27,13 @@ export function createSettingsModal(
     const block = buildSettingsBlocks(modify, settings, context, banner);
     return {
         id: viewId ?? `${USER_MODAL_PREFIX}-${newId()}`,
-        title: block.newPlainTextObject('Auto Reply', true),
+        title: block.newPlainTextObject(translate('modal_title', context.language), true),
         submit: hasFields(block) ? block.newButtonElement({
-            text: block.newPlainTextObject('Submit'),
+            text: block.newPlainTextObject(translate('btn_submit', context.language)),
             style: ButtonStyle.PRIMARY,
         }) : undefined,
         close: block.newButtonElement({
-            text: block.newPlainTextObject('Close'),
+            text: block.newPlainTextObject(translate('btn_close', context.language)),
         }),
         blocks: block.getBlocks(),
     };
