@@ -416,6 +416,22 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, user.id);
         await persistence.updateByAssociation(assoc, settings, true);
 
+        // The room panel behind the form still shows the old state; its id is
+        // the value of the form's submit button (see OpenUntilForm)
+        const panelId = (interactionData.view as { submit?: { value?: string } }).submit?.value;
+        if (panelId) {
+            try {
+                const barContext = await this.buildBarContext(user, interactionData.room, read);
+                await modify.getUiController().updateContextualBarView(
+                    createContextualBarView(panelId, buildSettingsBlocks(modify, settings, barContext)),
+                    { triggerId: interactionData.triggerId },
+                    user,
+                );
+            } catch (error) {
+                this.getLogger().error({ msg: 'room panel update failed', error: String(error) });
+            }
+        }
+
         // successResponse closes the modal — no duplicate submissions
         return context.getInteractionResponder().successResponse();
     }
@@ -486,7 +502,9 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (data.actionId === 'OpenUntilForm') {
             const tz = resolveTzMinutes(data.user, settings);
             const existing = settings.mode === 'until' ? settings.until : undefined;
-            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz, existing);
+            // the room panel's id travels with the form so its submit can refresh the panel
+            const panelId = data.container.id.startsWith(USER_MODAL_PREFIX) ? undefined : data.container.id;
+            const modal = await createUntilModal(panelId, modify, settings, barContext.language, tz, existing);
             return context.getInteractionResponder().openModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();

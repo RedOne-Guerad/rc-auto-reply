@@ -48,6 +48,9 @@
         },
         {
             "name": "persistence"
+        },
+        {
+            "name": "ui.interact"
         }
     ]
 }
