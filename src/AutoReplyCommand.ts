@@ -125,7 +125,7 @@ export class AutoReplyCommand implements ISlashCommand {
         return reply(translate('cmd_until_set', lang, {
             until: formatInTz(end, tz),
             duration: formatDurationUntil(end),
-        }) + messageFor(updated));
+        }) + messageFor(updated, tz, startNow));
     }
 
     /** /auto-reply from <when> until <when> [message] — a future window.
@@ -177,10 +177,11 @@ export class AutoReplyCommand implements ISlashCommand {
             enabledAt: start <= Date.now() ? Date.now() : start,
         };
         await persist(updated);
+        // the message as sent inside the window, evaluated at its start
         return reply(translate('cmd_from_until_set', lang, {
             from: formatInTz(start, tz),
             until: formatInTz(end, tz),
-        }) + messageFor(updated));
+        }) + messageFor(updated, tz, start));
     }
 
     private async handleRemoveUser(
