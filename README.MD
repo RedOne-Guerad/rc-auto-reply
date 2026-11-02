@@ -59,7 +59,7 @@ If you text a user while your auto-reply is enabled, you will get options to dis
 
 - **End-to-end encrypted (E2EE) rooms**: apps run server-side and cannot read or produce encrypted content. To avoid leaking plaintext into encrypted conversations, Auto-Reply does not reply in E2EE rooms at all (issue #8). Use regular DMs/channels.
 - The exclusion list in the room panel offers the users of the conversation you opened it from; use `remove-user`/`include-user` for anyone else. The user-menu modal works everywhere.
-- 2.1 "schedulers" (daily/weekly recurring) were replaced in 2.2.0 by timed windows (`until`). If you created a schedule in 2.1, auto-reply starts off after the upgrade, the settings panel shows a one-time notice and you can recreate it as a timed window. Old settings otherwise migrate automatically.
+- 2.1 "schedulers" (daily/weekly recurring) were replaced in 2.2.0 by timed windows (`until`). If you created a schedule in 2.1, auto-reply starts off after the upgrade, the settings panel shows a one-time notice and you can recreate it as a timed window. The 2.1 scheduler job is removed when the app starts. Old settings otherwise migrate automatically.
 
 ## Local development
 

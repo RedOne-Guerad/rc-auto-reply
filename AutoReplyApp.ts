@@ -1,5 +1,6 @@
 import {
     IConfigurationExtend,
+    IConfigurationModify,
     IEnvironmentRead,
     IHttp,
     IPersistence,
@@ -39,10 +40,26 @@ import { translate } from './src/i18n/translations';
 
 const SETTINGS_BLOCK = 'autoReplySettings';
 
+/** The recurring job of 2.1, see onEnable */
+const LEGACY_SCHEDULER_JOB = 'auto-reply-scheduler-tick';
+
 /** An @mention after start, space or punctuation like "(", but not inside an e-mail address */
 const MENTION = /(?:^|[^a-z0-9._@-])@([a-z0-9._-]+)/i;
 
 export class AutoReplyApp extends App implements IPostMessageSent {
+
+    /**
+     * 2.1 ran a recurring scheduler job. 2.2 has no processor for it, so after
+     * an upgrade it would stay and fail every 5 minutes; cancel it on start.
+     */
+    public async onEnable(environment: IEnvironmentRead, configurationModify: IConfigurationModify): Promise<boolean> {
+        try {
+            await configurationModify.scheduler.cancelJob(LEGACY_SCHEDULER_JOB);
+        } catch (error) {
+            this.getLogger().warn({ msg: 'could not cancel the 2.1 scheduler job', error: String(error) });
+        }
+        return true;
+    }
 
     public async checkPostMessageSent(message: IMessage, read: IRead, http: IHttp): Promise<boolean> {
         const room = message.room;
