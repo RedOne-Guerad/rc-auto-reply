@@ -275,7 +275,8 @@ export function parseWhen(text: string, tzMinutes: number, now = Date.now()): nu
     let hasTime = false;
     if (words.length > 0) {
         const t = words[0].match(/^(\d{1,2}):(\d{2})$/);
-        if (!t) {
+        // a word after the time is not part of it ("18:00 Bin weg" is a time plus a message)
+        if (!t || words.length > 1) {
             return null;
         }
         h = Number(t[1]);

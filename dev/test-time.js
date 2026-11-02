@@ -39,6 +39,8 @@ assert.strictEqual(h.parseWhen('monday', TZ, NOW), local(4, 0, 0), 'monday from 
 assert.strictEqual(h.parseWhen('friday 10:00', TZ, NOW), local(1, 10, 0), 'weekday with time');
 
 assert.strictEqual(h.parseWhen('nonsense', TZ, NOW), null, 'unparseable -> null');
+assert.strictEqual(h.parseWhen('18:00 bin', TZ, NOW), null, 'time followed by a word is not a time');
+assert.strictEqual(h.parseWhen('tomorrow 09:00 bin', TZ, NOW), null, 'day + time followed by a word is not a time');
 assert.strictEqual(h.parseWhen('', TZ, NOW), null, 'empty -> null');
 assert.strictEqual(h.parseWhen('2026-13-40', TZ, NOW), null, 'invalid date -> null');
 
