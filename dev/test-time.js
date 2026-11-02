@@ -64,6 +64,15 @@ assert.strictEqual(new Date(afterDst).toISOString(), '2026-10-12T16:00:00.000Z',
 // no wall fields -> epochs used as-is
 assert.deepStrictEqual(h.windowBounds({ start: 1, end: 2 }, 60), { start: 1, end: 2 }, 'no walls -> epochs');
 
+// ---- shouldAutoReply: a planned window is its own enable period ------------
+
+const S = Date.UTC(2026, 9, 12, 8, 0);
+const planned = { mode: 'until', message: 'm', frequency: 'once', enabledAt: S, until: { start: S, end: S + 8 * 3600000 } };
+assert.strictEqual(h.shouldAutoReply(planned, { lastReplyAt: S - 86400000 }, 0, S + 60000), true, 'once: first reply in a planned window');
+assert.strictEqual(h.shouldAutoReply(planned, { lastReplyAt: S + 60000 }, 0, S + 120000), false, 'once: no second reply in the window');
+const plannedCooldown = { ...planned, frequency: 'cooldown', cooldownHours: 24 };
+assert.strictEqual(h.shouldAutoReply(plannedCooldown, { lastReplyAt: S - 3600000 }, 0, S + 60000), true, 'cooldown restarts with a planned window');
+
 // ---- formatting ---------------------------------------------------------------
 
 assert.strictEqual(h.formatInTz(Date.UTC(2026, 9, 12, 15, 0), 120), 'Mon 12 Oct, 17:00', 'formatInTz with offset');

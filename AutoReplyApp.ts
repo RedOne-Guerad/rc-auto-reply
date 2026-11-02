@@ -410,7 +410,8 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             },
             // remember the chosen timezone as the fallback for next time
             timezoneOffsetMinutes: tz,
-            enabledAt: start <= now ? now : previous.enabledAt,
+            // a planned window starts its own enable period (see AutoReplyCommand)
+            enabledAt: start <= now ? now : start,
         };
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, user.id);
         await persistence.updateByAssociation(assoc, settings, true);

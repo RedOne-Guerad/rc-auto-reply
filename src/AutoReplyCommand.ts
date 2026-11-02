@@ -172,7 +172,9 @@ export class AutoReplyCommand implements ISlashCommand {
                 endWall: epochToWall(end, tz),
                 message: message || undefined,
             },
-            enabledAt: start <= Date.now() ? Date.now() : undefined,
+            // a planned window starts its own enable period, so `once` and
+            // the cooldown count from the window start
+            enabledAt: start <= Date.now() ? Date.now() : start,
         };
         await persist(updated);
         return reply(translate('cmd_from_until_set', lang, {
