@@ -307,7 +307,7 @@ function utcToEpoch(y: number, mo: number, d: number, h: number, mi: number, tzM
 /**
  * Sends a message as the app bot, displayed under the away user's alias.
  */
-export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
+export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder, threadId?: string): Promise<void> {
     const botUser = await app.getAccessors().reader.getUserReader().getAppUser(app.getID());
     if (!botUser) {
         app.getLogger().warn('App user not found; cannot send auto-reply');
@@ -327,6 +327,10 @@ export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoo
     }
     if (blocks !== undefined) {
         messageStructure.setBlocks(blocks);
+    }
+    // answer in the thread the message was written in
+    if (threadId) {
+        messageStructure.setThreadId(threadId);
     }
     try {
         await modify.getCreator().finish(messageStructure);

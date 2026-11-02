@@ -162,7 +162,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (!shouldAutoReply(otherSettings, tracking, otherTz, now)) {
             return;
         }
-        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now));
+        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now), undefined, undefined, message.threadId);
         tracking.lastReplyAt = now;
         await updateChatTracking(otherUser.id, message.room.id, tracking, persistence);
     }
@@ -192,7 +192,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             }
             const tracking = await getChatTracking(mentionedUser.id, message.room.id, read);
             if (shouldAutoReply(settings, tracking, mentionedTz, now)) {
-                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now));
+                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now), undefined, undefined, message.threadId);
                 tracking.lastReplyAt = now;
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
