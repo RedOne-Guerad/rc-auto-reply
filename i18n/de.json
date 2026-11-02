@@ -1,0 +1,5 @@
+{
+    "auto-reply-param-example": "on <Nachricht (optional)>|off|until <wann, z. B. friday 17:00> [Nachricht]|from <wann> until <wann> [Nachricht]|status|list|remove-user <ID|Benutzername>|include-user <ID|Benutzername>|frequency every|once|cooldown <Stunden>|mentions on|off",
+    "auto-reply-description": "Beantwortet eingehende Direktnachrichten (auf Wunsch auch Erwähnungen) automatisch mit einer Abwesenheitsnachricht.",
+    "auto-reply-room-action-name": "💬 Auto-Reply"
+}
