@@ -39,6 +39,9 @@ import { translate } from './src/i18n/translations';
 
 const SETTINGS_BLOCK = 'autoReplySettings';
 
+/** An @mention after start, space or punctuation like "(", but not inside an e-mail address */
+const MENTION = /(?:^|[^a-z0-9._@-])@([a-z0-9._-]+)/i;
+
 export class AutoReplyApp extends App implements IPostMessageSent {
 
     public async checkPostMessageSent(message: IMessage, read: IRead, http: IHttp): Promise<boolean> {
@@ -55,7 +58,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
         if (room.type === RoomType.CHANNEL || room.type === RoomType.PRIVATE_GROUP) {
             // only potentially interesting when someone is @mentioned
-            return /(?:^|\s)@[a-z0-9._-]+/i.test(message.text ?? '');
+            return MENTION.test(message.text ?? '');
         }
         return false;
     }
@@ -541,11 +544,12 @@ function localToEpoch(local: Date, dayDelta: number, hhmm: string, tzMinutes: nu
 
 function parseMentionedUsernames(text: string): string[] {
     const mentioned = new Set<string>();
-    const pattern = /(?:^|\s)@([a-z0-9._-]+)/gi;
+    const pattern = new RegExp(MENTION.source, 'gi');
     let match: RegExpExecArray | null;
     // exec loop instead of matchAll: ES2017-safe for older build toolchains
     while ((match = pattern.exec(text)) !== null) {
-        const username = match[1].toLowerCase();
+        // a dot right after the name ends the sentence ("ask @alice.")
+        const username = match[1].replace(/\.+$/, '').toLowerCase();
         if (username !== 'all' && username !== 'here') {
             mentioned.add(username);
         }
