@@ -13,8 +13,11 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
     const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, userId);
     const records = await read.getPersistenceReader().readByAssociation(assocMe);
     const stored = records[0] as Partial<IAutoReplySettings> & { on?: boolean } | undefined;
-    // migration: 2.1 stored a boolean `on`; 2.2 uses mode
-    const mode: IAutoReplySettings['mode'] = stored?.mode ?? (stored?.on ? 'always' : 'off');
+    // migration: 2.1 stored a boolean `on`; 2.2 uses mode. With 2.1 schedulers
+    // that `on` is whatever the last scheduler run left behind, not a choice
+    // of the user, so they start off instead of replying for good.
+    const scheduled = (stored?.schedulers ?? []).length > 0;
+    const mode: IAutoReplySettings['mode'] = stored?.mode ?? (stored?.on && !scheduled ? 'always' : 'off');
     return {
         mode,
         message: stored?.message || DEFAULT_MESSAGE,

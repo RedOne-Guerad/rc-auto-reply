@@ -75,6 +75,12 @@ assert.strictEqual(h.shouldAutoReply(planned, { lastReplyAt: S + 60000 }, 0, S +
 const plannedCooldown = { ...planned, frequency: 'cooldown', cooldownHours: 24 };
 assert.strictEqual(h.shouldAutoReply(plannedCooldown, { lastReplyAt: S - 3600000 }, 0, S + 60000), true, 'cooldown restarts with a planned window');
 
+// ---- migration from 2.1 --------------------------------------------------------
+
+function readerWith(record) {
+    return { getPersistenceReader: () => ({ readByAssociation: async () => (record ? [record] : []) }) };
+}
+
 // ---- formatting ---------------------------------------------------------------
 
 assert.strictEqual(h.formatInTz(Date.UTC(2026, 9, 12, 15, 0), 120), 'Mon 12 Oct, 17:00', 'formatInTz with offset');
@@ -82,4 +88,10 @@ assert.strictEqual(h.formatOffsetMinutes(330), 'UTC+05:30', 'half-hour offset la
 assert.strictEqual(h.formatDurationUntil(Date.now() + 2 * 86400000 + 3 * 3600000), '2d 3h', 'duration days+hours');
 assert.strictEqual(h.formatDurationUntil(Date.now() + 5 * 60000), '5m', 'duration minutes');
 
-console.log('All time-helper unit tests passed.');
+(async () => {
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: true }))).mode, 'always', '2.1 on without schedulers stays on');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: true, schedulers: [{ id: 's' }] }))).mode, 'off', '2.1 on set by a scheduler starts off');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: false, schedulers: [{ id: 's' }] }))).mode, 'off', '2.1 off with schedulers stays off');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ mode: 'always', schedulers: [{ id: 's' }] }))).mode, 'always', '2.2 mode wins over leftover schedulers');
+    console.log('All time-helper unit tests passed.');
+})().catch((e) => { console.error(e); process.exit(1); });
