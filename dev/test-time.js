@@ -39,6 +39,8 @@ assert.strictEqual(h.parseWhen('monday', TZ, NOW), local(4, 0, 0), 'monday from 
 assert.strictEqual(h.parseWhen('friday 10:00', TZ, NOW), local(1, 10, 0), 'weekday with time');
 
 assert.strictEqual(h.parseWhen('nonsense', TZ, NOW), null, 'unparseable -> null');
+assert.strictEqual(h.parseWhen('18:00 bin', TZ, NOW), null, 'time followed by a word is not a time');
+assert.strictEqual(h.parseWhen('tomorrow 09:00 bin', TZ, NOW), null, 'day + time followed by a word is not a time');
 assert.strictEqual(h.parseWhen('', TZ, NOW), null, 'empty -> null');
 assert.strictEqual(h.parseWhen('2026-13-40', TZ, NOW), null, 'invalid date -> null');
 
@@ -64,6 +66,21 @@ assert.strictEqual(new Date(afterDst).toISOString(), '2026-10-12T16:00:00.000Z',
 // no wall fields -> epochs used as-is
 assert.deepStrictEqual(h.windowBounds({ start: 1, end: 2 }, 60), { start: 1, end: 2 }, 'no walls -> epochs');
 
+// ---- shouldAutoReply: a planned window is its own enable period ------------
+
+const S = Date.UTC(2026, 9, 12, 8, 0);
+const planned = { mode: 'until', message: 'm', frequency: 'once', enabledAt: S, until: { start: S, end: S + 8 * 3600000 } };
+assert.strictEqual(h.shouldAutoReply(planned, { lastReplyAt: S - 86400000 }, 0, S + 60000), true, 'once: first reply in a planned window');
+assert.strictEqual(h.shouldAutoReply(planned, { lastReplyAt: S + 60000 }, 0, S + 120000), false, 'once: no second reply in the window');
+const plannedCooldown = { ...planned, frequency: 'cooldown', cooldownHours: 24 };
+assert.strictEqual(h.shouldAutoReply(plannedCooldown, { lastReplyAt: S - 3600000 }, 0, S + 60000), true, 'cooldown restarts with a planned window');
+
+// ---- migration from 2.1 --------------------------------------------------------
+
+function readerWith(record) {
+    return { getPersistenceReader: () => ({ readByAssociation: async () => (record ? [record] : []) }) };
+}
+
 // ---- formatting ---------------------------------------------------------------
 
 assert.strictEqual(h.formatInTz(Date.UTC(2026, 9, 12, 15, 0), 120), 'Mon 12 Oct, 17:00', 'formatInTz with offset');
@@ -71,4 +88,10 @@ assert.strictEqual(h.formatOffsetMinutes(330), 'UTC+05:30', 'half-hour offset la
 assert.strictEqual(h.formatDurationUntil(Date.now() + 2 * 86400000 + 3 * 3600000), '2d 3h', 'duration days+hours');
 assert.strictEqual(h.formatDurationUntil(Date.now() + 5 * 60000), '5m', 'duration minutes');
 
-console.log('All time-helper unit tests passed.');
+(async () => {
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: true }))).mode, 'always', '2.1 on without schedulers stays on');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: true, schedulers: [{ id: 's' }] }))).mode, 'off', '2.1 on set by a scheduler starts off');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ on: false, schedulers: [{ id: 's' }] }))).mode, 'off', '2.1 off with schedulers stays off');
+    assert.strictEqual((await h.getAutoReplySettings('u', readerWith({ mode: 'always', schedulers: [{ id: 's' }] }))).mode, 'always', '2.2 mode wins over leftover schedulers');
+    console.log('All time-helper unit tests passed.');
+})().catch((e) => { console.error(e); process.exit(1); });

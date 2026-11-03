@@ -3,7 +3,7 @@ import { ButtonStyle } from "@rocket.chat/apps-engine/definition/uikit";
 import { IUIKitModalViewParam } from "@rocket.chat/apps-engine/definition/uikit/UIKitInteractionResponder";
 import { newId } from "../utils/helpers";
 import { IAutoReplySettings } from "../utils/IAutoReplySettings";
-import { buildSettingsBlocks, IBarContext, statusLine } from "./createContextualBarView";
+import { buildSettingsBlocks, hasFields, IBarContext, statusLine } from "./createContextualBarView";
 import { AppLanguage, translate } from "../i18n/translations";
 
 /** View id prefix identifying the user-menu settings modal (its submit keeps
@@ -27,13 +27,13 @@ export function createSettingsModal(
     const block = buildSettingsBlocks(modify, settings, context, banner);
     return {
         id: viewId ?? `${USER_MODAL_PREFIX}-${newId()}`,
-        title: block.newPlainTextObject('Auto Reply', true),
-        submit: block.newButtonElement({
-            text: block.newPlainTextObject('Submit'),
+        title: block.newPlainTextObject(translate('modal_title', context.language), true),
+        submit: hasFields(block) ? block.newButtonElement({
+            text: block.newPlainTextObject(translate('btn_submit', context.language)),
             style: ButtonStyle.PRIMARY,
-        }),
+        }) : undefined,
         close: block.newButtonElement({
-            text: block.newPlainTextObject('Close'),
+            text: block.newPlainTextObject(translate('btn_close', context.language)),
         }),
         blocks: block.getBlocks(),
     };

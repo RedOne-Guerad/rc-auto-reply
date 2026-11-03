@@ -139,12 +139,12 @@ export async function createUntilModal(
         id: newId(),
         title: block.newPlainTextObject(translate('modal_until_title', language), false),
         submit: block.newButtonElement({
-            text: block.newPlainTextObject('Submit'),
+            text: block.newPlainTextObject(translate('btn_submit', language)),
             style: ButtonStyle.PRIMARY,
             value: cxtViewID,
         }),
         close: block.newButtonElement({
-            text: block.newPlainTextObject('Cancel'),
+            text: block.newPlainTextObject(translate('btn_cancel', language)),
         }),
         blocks: block.getBlocks(),
     };

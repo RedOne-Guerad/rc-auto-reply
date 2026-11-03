@@ -125,7 +125,7 @@ export class AutoReplyCommand implements ISlashCommand {
         return reply(translate('cmd_until_set', lang, {
             until: formatInTz(end, tz),
             duration: formatDurationUntil(end),
-        }) + messageFor(updated));
+        }) + messageFor(updated, tz, startNow));
     }
 
     /** /auto-reply from <when> until <when> [message] — a future window.
@@ -142,7 +142,8 @@ export class AutoReplyCommand implements ISlashCommand {
         persist: (s: IAutoReplySettings) => Promise<IAutoReplySettings>,
     ): Promise<void> {
         const untilIdx = rest.findIndex((a) => a.toLowerCase() === 'until');
-        if (untilIdx < 2 || untilIdx === rest.length - 1) {
+        // at least one token before 'until' ("from tomorrow until …"), one after
+        if (untilIdx < 1 || untilIdx === rest.length - 1) {
             return reply(translate('cmd_invalid_usage', lang));
         }
         const tz = resolveTzMinutes(sender, settings);
@@ -172,13 +173,16 @@ export class AutoReplyCommand implements ISlashCommand {
                 endWall: epochToWall(end, tz),
                 message: message || undefined,
             },
-            enabledAt: start <= Date.now() ? Date.now() : undefined,
+            // a planned window starts its own enable period, so `once` and
+            // the cooldown count from the window start
+            enabledAt: start <= Date.now() ? Date.now() : start,
         };
         await persist(updated);
+        // the message as sent inside the window, evaluated at its start
         return reply(translate('cmd_from_until_set', lang, {
             from: formatInTz(start, tz),
             until: formatInTz(end, tz),
-        }) + messageFor(updated));
+        }) + messageFor(updated, tz, start));
     }
 
     private async handleRemoveUser(
@@ -324,7 +328,7 @@ export class AutoReplyCommand implements ISlashCommand {
             default:
                 lines.push(translate('cmd_list_frequency_every', lang));
         }
-        lines.push(translate('cmd_list_mentions', lang, { value: settings.replyToMentions ? 'on' : 'off' }));
+        lines.push(translate('cmd_list_mentions', lang, { value: translate(settings.replyToMentions ? 'bar_on' : 'bar_off', lang) }));
         const profileTz = Number((user as unknown as { utcOffset?: number | null }).utcOffset);
         const tzKey = Number.isFinite(profileTz) && (user as unknown as { utcOffset?: number | null }).utcOffset !== null
             ? 'cmd_list_timezone' : 'cmd_list_timezone_fallback';

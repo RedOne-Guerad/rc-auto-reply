@@ -1,5 +1,6 @@
 import {
     IConfigurationExtend,
+    IConfigurationModify,
     IEnvironmentRead,
     IHttp,
     IPersistence,
@@ -39,7 +40,26 @@ import { translate } from './src/i18n/translations';
 
 const SETTINGS_BLOCK = 'autoReplySettings';
 
+/** The recurring job of 2.1, see onEnable */
+const LEGACY_SCHEDULER_JOB = 'auto-reply-scheduler-tick';
+
+/** An @mention after start, space or punctuation like "(", but not inside an e-mail address */
+const MENTION = /(?:^|[^a-z0-9._@-])@([a-z0-9._-]+)/i;
+
 export class AutoReplyApp extends App implements IPostMessageSent {
+
+    /**
+     * 2.1 ran a recurring scheduler job. 2.2 has no processor for it, so after
+     * an upgrade it would stay and fail every 5 minutes; cancel it on start.
+     */
+    public async onEnable(environment: IEnvironmentRead, configurationModify: IConfigurationModify): Promise<boolean> {
+        try {
+            await configurationModify.scheduler.cancelJob(LEGACY_SCHEDULER_JOB);
+        } catch (error) {
+            this.getLogger().warn({ msg: 'could not cancel the 2.1 scheduler job', error: String(error) });
+        }
+        return true;
+    }
 
     public async checkPostMessageSent(message: IMessage, read: IRead, http: IHttp): Promise<boolean> {
         const room = message.room;
@@ -55,7 +75,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         }
         if (room.type === RoomType.CHANNEL || room.type === RoomType.PRIVATE_GROUP) {
             // only potentially interesting when someone is @mentioned
-            return /(?:^|\s)@[a-z0-9._-]+/i.test(message.text ?? '');
+            return MENTION.test(message.text ?? '');
         }
         return false;
     }
@@ -159,7 +179,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (!shouldAutoReply(otherSettings, tracking, otherTz, now)) {
             return;
         }
-        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now));
+        await sendMessage(this, modify, message.room, otherUser, messageFor(otherSettings, otherTz, now), undefined, undefined, message.threadId);
         tracking.lastReplyAt = now;
         await updateChatTracking(otherUser.id, message.room.id, tracking, persistence);
     }
@@ -189,7 +209,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             }
             const tracking = await getChatTracking(mentionedUser.id, message.room.id, read);
             if (shouldAutoReply(settings, tracking, mentionedTz, now)) {
-                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now));
+                await sendMessage(this, modify, message.room, mentionedUser, messageFor(settings, mentionedTz, now), undefined, undefined, message.threadId);
                 tracking.lastReplyAt = now;
                 await updateChatTracking(mentionedUser.id, message.room.id, tracking, persistence);
             }
@@ -249,7 +269,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
         if (actionId === 'auto-reply-room-action-id') {
             const autoReplySettings = await getAutoReplySettings(user.id, read);
             const barContext = await this.buildBarContext(user, room, read);
-            const view = createContextualBarView(undefined, buildSettingsBlocks(modify, autoReplySettings, barContext));
+            const view = createContextualBarView(undefined, buildSettingsBlocks(modify, autoReplySettings, barContext), barContext.language);
             return context.getInteractionResponder().openContextualBarViewResponse(view);
         }
         if (actionId === 'auto-reply-user-action-id') {
@@ -410,10 +430,27 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             },
             // remember the chosen timezone as the fallback for next time
             timezoneOffsetMinutes: tz,
-            enabledAt: start <= now ? now : previous.enabledAt,
+            // a planned window starts its own enable period (see AutoReplyCommand)
+            enabledAt: start <= now ? now : start,
         };
         const assoc = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, user.id);
         await persistence.updateByAssociation(assoc, settings, true);
+
+        // The room panel behind the form still shows the old state; its id is
+        // the value of the form's submit button (see OpenUntilForm)
+        const panelId = (interactionData.view as { submit?: { value?: string } }).submit?.value;
+        if (panelId) {
+            try {
+                const barContext = await this.buildBarContext(user, interactionData.room, read);
+                await modify.getUiController().updateContextualBarView(
+                    createContextualBarView(panelId, buildSettingsBlocks(modify, settings, barContext), barContext.language),
+                    { triggerId: interactionData.triggerId },
+                    user,
+                );
+            } catch (error) {
+                this.getLogger().error({ msg: 'room panel update failed', error: String(error) });
+            }
+        }
 
         // successResponse closes the modal — no duplicate submissions
         return context.getInteractionResponder().successResponse();
@@ -470,7 +507,7 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             settings.enabledAt = Date.now();
             await persistence.updateByAssociation(assoc, settings, true);
             return context.getInteractionResponder().updateContextualBarViewResponse(
-                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext), barContext.language),
             );
         }
         if (data.actionId === 'TurnOff') {
@@ -479,13 +516,15 @@ export class AutoReplyApp extends App implements IPostMessageSent {
             settings.until = undefined;
             await persistence.updateByAssociation(assoc, settings, true);
             return context.getInteractionResponder().updateContextualBarViewResponse(
-                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext)),
+                createContextualBarView(data.container.id, buildSettingsBlocks(modify, settings, barContext), barContext.language),
             );
         }
         if (data.actionId === 'OpenUntilForm') {
             const tz = resolveTzMinutes(data.user, settings);
             const existing = settings.mode === 'until' ? settings.until : undefined;
-            const modal = await createUntilModal(data.container.id, modify, settings, barContext.language, tz, existing);
+            // the room panel's id travels with the form so its submit can refresh the panel
+            const panelId = data.container.id.startsWith(USER_MODAL_PREFIX) ? undefined : data.container.id;
+            const modal = await createUntilModal(panelId, modify, settings, barContext.language, tz, existing);
             return context.getInteractionResponder().openModalViewResponse(modal);
         }
         return context.getInteractionResponder().successResponse();
@@ -522,11 +561,12 @@ function localToEpoch(local: Date, dayDelta: number, hhmm: string, tzMinutes: nu
 
 function parseMentionedUsernames(text: string): string[] {
     const mentioned = new Set<string>();
-    const pattern = /(?:^|\s)@([a-z0-9._-]+)/gi;
+    const pattern = new RegExp(MENTION.source, 'gi');
     let match: RegExpExecArray | null;
     // exec loop instead of matchAll: ES2017-safe for older build toolchains
     while ((match = pattern.exec(text)) !== null) {
-        const username = match[1].toLowerCase();
+        // a dot right after the name ends the sentence ("ask @alice.")
+        const username = match[1].replace(/\.+$/, '').toLowerCase();
         if (username !== 'all' && username !== 'here') {
             mentioned.add(username);
         }

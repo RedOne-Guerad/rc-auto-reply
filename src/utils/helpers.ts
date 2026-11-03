@@ -13,8 +13,11 @@ export async function getAutoReplySettings(userId: string, read: IRead): Promise
     const assocMe = new RocketChatAssociationRecord(RocketChatAssociationModel.USER, userId);
     const records = await read.getPersistenceReader().readByAssociation(assocMe);
     const stored = records[0] as Partial<IAutoReplySettings> & { on?: boolean } | undefined;
-    // migration: 2.1 stored a boolean `on`; 2.2 uses mode
-    const mode: IAutoReplySettings['mode'] = stored?.mode ?? (stored?.on ? 'always' : 'off');
+    // migration: 2.1 stored a boolean `on`; 2.2 uses mode. With 2.1 schedulers
+    // that `on` is whatever the last scheduler run left behind, not a choice
+    // of the user, so they start off instead of replying for good.
+    const scheduled = (stored?.schedulers ?? []).length > 0;
+    const mode: IAutoReplySettings['mode'] = stored?.mode ?? (stored?.on && !scheduled ? 'always' : 'off');
     return {
         mode,
         message: stored?.message || DEFAULT_MESSAGE,
@@ -275,7 +278,8 @@ export function parseWhen(text: string, tzMinutes: number, now = Date.now()): nu
     let hasTime = false;
     if (words.length > 0) {
         const t = words[0].match(/^(\d{1,2}):(\d{2})$/);
-        if (!t) {
+        // a word after the time is not part of it ("18:00 Bin weg" is a time plus a message)
+        if (!t || words.length > 1) {
             return null;
         }
         h = Number(t[1]);
@@ -306,7 +310,7 @@ function utcToEpoch(y: number, mo: number, d: number, h: number, mi: number, tzM
 /**
  * Sends a message as the app bot, displayed under the away user's alias.
  */
-export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder): Promise<void> {
+export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoom, user: IUser, message?: string, attachments?: Array<IMessageAttachment>, blocks?: BlockBuilder, threadId?: string): Promise<void> {
     const botUser = await app.getAccessors().reader.getUserReader().getAppUser(app.getID());
     if (!botUser) {
         app.getLogger().warn('App user not found; cannot send auto-reply');
@@ -326,6 +330,10 @@ export async function sendMessage(app: AutoReplyApp, modify: IModify, room: IRoo
     }
     if (blocks !== undefined) {
         messageStructure.setBlocks(blocks);
+    }
+    // answer in the thread the message was written in
+    if (threadId) {
+        messageStructure.setThreadId(threadId);
     }
     try {
         await modify.getCreator().finish(messageStructure);
