@@ -142,7 +142,8 @@ export class AutoReplyCommand implements ISlashCommand {
         persist: (s: IAutoReplySettings) => Promise<IAutoReplySettings>,
     ): Promise<void> {
         const untilIdx = rest.findIndex((a) => a.toLowerCase() === 'until');
-        if (untilIdx < 2 || untilIdx === rest.length - 1) {
+        // at least one token before 'until' ("from tomorrow until …"), one after
+        if (untilIdx < 1 || untilIdx === rest.length - 1) {
             return reply(translate('cmd_invalid_usage', lang));
         }
         const tz = resolveTzMinutes(sender, settings);
