@@ -4,10 +4,10 @@
  * The apps-engine i18n JSON files only localize slash-command/button metadata
  * (handled by Rocket.Chat itself); there is no engine API to translate
  * arbitrary strings, so the app ships its own dictionary. The language is
- * resolved from the server's `Language` setting.
+ * resolved from the server's `Language` setting (`de` and the informal `de-IN` both get German).
  */
 
-export type AppLanguage = 'en' | 'ru' | 'lt';
+export type AppLanguage = 'en' | 'ru' | 'lt' | 'de';
 
 type Dictionary = { [key: string]: string };
 
@@ -284,7 +284,100 @@ const lt: Dictionary = {
     form_bad_range: 'Pabaiga turi būti po pradžios.',
 };
 
-const dictionaries: { [lang in AppLanguage]: Dictionary } = { en, ru, lt };
+const de: Dictionary = {
+    // command replies
+    cmd_invalid_usage: 'Ungültige Verwendung des Befehls. Möglich sind `on [Nachricht]`, `off`, `until <wann> [Nachricht]`, `from <wann> until <wann> [Nachricht]`, `status`, `remove-user <userId|Benutzername>`, `include-user <userId|Benutzername>`, `frequency every|once|cooldown [Stunden]`, `mentions on|off`, `timezone <Versatz>` und `list`.',
+    cmd_unknown_option: 'Diese Option gibt es nicht. `/auto-reply list` zeigt alle Möglichkeiten.',
+    cmd_on: '`Auto-Reply` ist aktiviert, mit folgender Nachricht:\n>',
+    cmd_off: '`Auto-Reply` ist deaktiviert, @',
+    cmd_user_not_found: 'Benutzer nicht gefunden: `',
+    cmd_remove_user_usage: 'Verwendung: `/auto-reply remove-user <userId|Benutzername>`',
+    cmd_removed_for: '`Auto-Reply` ist deaktiviert für: @',
+    cmd_include_user_usage: 'Verwendung: `/auto-reply include-user <userId|Benutzername>`',
+    cmd_included_for: '`Auto-Reply` ist wieder aktiviert für: @',
+    cmd_not_excluded: '@',
+    cmd_not_excluded_2: '` ist nicht ausgenommen.',
+    cmd_frequency_usage: 'Verwendung: `/auto-reply frequency every|once|cooldown [Stunden]`',
+    cmd_frequency_invalid_hours: 'Die Pause bitte als Zahl in Stunden angeben, z. B. `/auto-reply frequency cooldown 12`.',
+    cmd_frequency_set_every: 'Auto-Reply antwortet jetzt auf *jede Nachricht*.',
+    cmd_frequency_set_once: 'Auto-Reply antwortet jetzt *einmal pro Unterhaltung* (bis zum nächsten Deaktivieren und Aktivieren).',
+    cmd_frequency_set_cooldown: 'Auto-Reply antwortet jetzt *höchstens alle {hours} Stunden* pro Unterhaltung.',
+    cmd_mentions_usage: 'Verwendung: `/auto-reply mentions on|off`',
+    cmd_mentions_on: 'Auto-Reply antwortet jetzt auch auf *Erwähnungen* in Kanälen und privaten Gruppen.',
+    cmd_mentions_off: 'Auto-Reply antwortet nicht mehr auf Erwähnungen in Kanälen und privaten Gruppen.',
+    cmd_timezone_usage: 'Verwendung: `/auto-reply timezone +2` (oder `-5.5`, `0`, ...)',
+    cmd_timezone_invalid: 'Der Versatz ist nicht lesbar. Bitte in Stunden wie `+2`, `-5` oder halben Stunden wie `+5.5` angeben.',
+    cmd_timezone_set: 'Ersatz-Zeitzone auf *{offset}* gesetzt (eine Zeitzone im Profil hat Vorrang).',
+    cmd_until_usage: 'Verwendung: `/auto-reply until <wann> [Nachricht]`, z. B. `until friday 17:00`, `until 2026-10-12`, `until 18:00`',
+    cmd_until_invalid: '"{text}" ist nicht verständlich. Beispiele: `until friday 17:00`, `until tomorrow`, `until 2026-10-12 09:00`.',
+    cmd_until_after_end: 'Das Ende muss nach dem Beginn liegen.',
+    cmd_until_set: 'Auto-Reply ist AKTIV *bis {until}* (noch {duration}), mit der Nachricht:\n>',
+    cmd_from_until_set: 'Auto-Reply ist geplant von *{from}* bis *{until}*, mit der Nachricht:\n>',
+    cmd_status_on: '`Auto-Reply` ist AKTIV, mit folgender Nachricht:\n>',
+    cmd_status_until_future: '`Auto-Reply` ist geplant: AKTIV *von {from} bis {until}*, mit der Nachricht:\n>',
+    cmd_status_off: '`Auto-Reply` ist INAKTIV.',
+    cmd_list_frequency_every: '• Häufigkeit: auf jede Nachricht',
+    cmd_list_frequency_once: '• Häufigkeit: einmal pro Unterhaltung',
+    cmd_list_frequency_cooldown: '• Häufigkeit: höchstens alle {hours} Stunden',
+    cmd_list_mentions: '• Erwähnungen in Kanälen: {value}',
+    cmd_list_timezone: '• Zeitzone: {offset} (Profil)',
+    cmd_list_timezone_fallback: '• Zeitzone: {offset} (manuell)',
+    cmd_list_excluded: '• Ausgenommen: {users}',
+    cmd_list_excluded_empty: '• Ausgenommen: niemand',
+    // notifications
+    notify_enabled_prompt: '`Auto-Reply` ist aktiviert. Jetzt deaktivieren?',
+    notify_btn_yes: 'Ja, deaktivieren',
+    notify_btn_no: 'Nein',
+    notify_btn_disable_for_user: 'Für diese Person deaktivieren',
+    notify_disabled_done: '✅ Auto-Reply ist jetzt deaktiviert.',
+    notify_disabled_for_done: '✅ Auto-Reply ist jetzt für @{username} deaktiviert.',
+    notify_ar_on: '*Auto-Reply* ist AKTIV, mit folgender Nachricht:\n',
+    notify_ar_until: '*Auto-Reply* ist AKTIV bis {until} (noch {duration}), mit folgender Nachricht:\n',
+    notify_ar_off: '*Auto-Reply* ist INAKTIV',
+    // contextual bar / modals
+    bar_description: '*Auto-Reply* beantwortet eingehende Direktnachrichten automatisch mit einer Abwesenheitsnachricht. So wissen alle, die schreiben, sofort Bescheid.',
+    bar_turn_on: 'Auto-Reply aktivieren',
+    bar_turn_off: 'Deaktivieren',
+    bar_until_button: 'Planen…',
+    bar_status_on: '🟢 Auto-Reply ist **AKTIV** bis zum Deaktivieren',
+    bar_status_until: '🟢 Auto-Reply ist **AKTIV bis {until}** (noch {duration})',
+    bar_status_scheduled: '🕒 Auto-Reply ist **geplant: AKTIV von {from} bis {until}**',
+    bar_status_off: '⚪ Auto-Reply ist **INAKTIV**',
+    legacy_schedulers: '⚠ Zeitpläne aus Version 2.1 gibt es in dieser Version nicht mehr. Stattdessen lässt sich mit **Planen…** ein Zeitraum festlegen.',
+    bar_window_from: 'Von',
+    bar_window_until: 'Bis',
+    bar_window_custom_message: 'Nachricht für diesen Zeitraum (optional):',
+    bar_end_now: 'Jetzt beenden',
+    bar_edit_window: 'Neu planen…',
+    bar_message_label: '📝 Auto-Reply-Nachricht:',
+    bar_frequency_label: '🔁 Auto-Reply senden:',
+    bar_frequency_every: 'auf jede Nachricht',
+    bar_frequency_once: 'einmal pro Unterhaltung',
+    bar_frequency_cooldown: 'höchstens alle …',
+    bar_cooldown_label: '⏱️ Pause:',
+    bar_cooldown_hours: '{hours} Std.',
+    bar_mentions_label: '💬 Auf Erwähnungen in Kanälen antworten:',
+    bar_on: 'Aktiviert',
+    bar_off: 'Deaktiviert',
+    modal_tz_label: '🌍 Zeitzone:',
+    bar_excluded_title: '*Ausgenommen*, diese Benutzer bekommen keine automatische Antwort:',
+    bar_excluded_empty: 'Noch niemand ausgenommen. Unten lassen sich Benutzer auswählen, die keine Antwort bekommen sollen.',
+    bar_excluded_placeholder: 'Benutzername',
+    bar_start_from: 'Ab:',
+    bar_start_now: 'Sofort',
+    bar_start_today: 'Heute um',
+    bar_start_tomorrow: 'Morgen um',
+    bar_start_date: 'Datum (JJJJ-MM-TT)',
+    bar_until_time: 'Um (24 h)',
+    bar_until_date: 'Datum (JJJJ-MM-TT)',
+    modal_saved: '✅ Gespeichert: {status}',
+    modal_title: 'Auto-Reply',
+    modal_until_title: 'Auto-Reply planen',
+    form_bad_date: 'Bitte ein gültiges Datum im Format JJJJ-MM-TT eingeben.',
+    form_bad_range: 'Das Ende muss nach dem Beginn liegen.',
+};
+
+const dictionaries: { [lang in AppLanguage]: Dictionary } = { en, ru, lt, de };
 
 export function translate(key: string, lang: AppLanguage, params?: { [k: string]: string | number }): string {
     let text = dictionaries[lang]?.[key] ?? dictionaries.en[key] ?? key;
@@ -298,5 +391,5 @@ export function translate(key: string, lang: AppLanguage, params?: { [k: string]
 
 export function normalizeLanguage(language: string | undefined): AppLanguage {
     const base = (language ?? 'en').toLowerCase().split(/[-_]/)[0];
-    return base === 'ru' ? 'ru' : base === 'lt' ? 'lt' : 'en';
+    return base === 'ru' ? 'ru' : base === 'lt' ? 'lt' : base === 'de' ? 'de' : 'en';
 }
