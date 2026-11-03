@@ -1,6 +1,12 @@
 # Marketplace upload kit — everything the cloud.rocket.chat form asks for
 
-Current version: **2.2.1** · Zip: `dist/auto-reply_2.2.1.zip` · Screenshots: `marketplace-screenshots/`
+Current version: **2.2.1** · Screenshots: `marketplace-screenshots/`
+
+**Two zips — do not mix them up:**
+- `dist/auto-reply_2.2.1.zip` — sources-only (no .js). **This is the one for the cloud.rocket.chat marketplace submission** (the cloud compiles it).
+- `dist/auto-reply_2.2.1-manual-install.zip` — compiled (contains AutoReplyApp.js), requiredApiVersion patched to ^1.36.0. For **manual installation/update** on a server (admin → Apps → upload, or `rc-apps deploy` users). Also attached to the GitHub release.
+
+**Note:** marketplace review is slow — expect days to weeks between submission and approval. Until it's approved, users can update manually with the manual-install zip from the GitHub release.
 
 Fill once (app listing — persists after first approval):
 
