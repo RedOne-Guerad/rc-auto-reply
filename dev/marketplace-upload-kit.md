@@ -1,6 +1,6 @@
 # Marketplace upload kit — everything the cloud.rocket.chat form asks for
 
-Current version: **2.2.0** · Zip: `dist/auto-reply_2.2.0.zip` · Screenshots: `marketplace-screenshots/`
+Current version: **2.2.1** · Zip: `dist/auto-reply_2.2.1.zip` · Screenshots: `marketplace-screenshots/`
 
 Fill once (app listing — persists after first approval):
 
@@ -29,7 +29,7 @@ Turn it on once from any direct message (room menu → Apps → Auto Reply), fro
 **Works everywhere you do**
 - Settings in the room panel and from your avatar menu — reachable anywhere, including encrypted rooms.
 - Slash commands: `/auto-reply on [message] | off | until <when> [message] | from <when> until <when> [message] | status | list | remove-user | include-user | frequency | mentions`
-- Available in English, Russian and Lithuanian (server language).
+- Available in English, German, Russian and Lithuanian (server language).
 - No administrator configuration required — each user manages their own auto-reply.
 
 **Good to know**
@@ -52,9 +52,18 @@ productivity, automation
 
 Re-entered on EVERY version submission:
 
-## Internal changelog (current: 2.2.0)
+## Internal changelog (current: 2.2.1)
 
 ```
+2.2.1 (2026-11-03)
+- Fix: once/cooldown now count per planned window; from-until accepted single-token
+  start times; bare-time message keeps its first word; tz-aware confirmations;
+  panel refresh after scheduling (ui.interact); mentions after punctuation; thread
+  replies; 2.1-scheduler users start off after upgrade; legacy scheduler job
+  cancelled (scheduler permission); translated view buttons (all by @ndo84bw, PRs
+  #22/#23, live-verified on 8.9.0).
+- New: German (de / de-IN) by @ndo84bw.
+
 2.2.0 (2026-10-12)
 - Redesign: recurring 2.1 schedulers (daily/weekly, background switching every
   5 minutes) are replaced by timed windows: mode off | on | on-until. The
@@ -114,9 +123,20 @@ Re-entered on EVERY version submission:
   en/ru/lt localization.
 ```
 
-## Public changelog (current: 2.2.0)
+## Public changelog (current: 2.2.1)
 
 ```
+Auto-Reply 2.2.1 — polish + German 🇩🇪
+
+FIXED SINCE 2.2.0: once-per-conversation now also works inside planned
+windows; @mentions are detected next to punctuation; replies to thread
+messages land in the thread; the panel refreshes right after scheduling;
+upgrade edge cases from 2.1 cleaned up.
+
+NEW: the app is now also available in German.
+
+— plus everything from 2.2.0:
+
 Auto-Reply 2.2 — schedule it like an out-of-office 🎉
 
 NEW
